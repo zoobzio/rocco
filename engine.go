@@ -120,8 +120,14 @@ func (e *Engine) Register(handlers ...RouteHandler) {
 }
 
 // RegisterOpenAPIHandler adds a handler that serves the OpenAPI specification as JSON.
-func (e *Engine) RegisterOpenAPIHandler(path string, info Info) {
-	e.chiRouter.Get(path, func(w http.ResponseWriter, _ *http.Request) {
+// If path is not provided, defaults to "/openapi".
+func (e *Engine) RegisterOpenAPIHandler(info Info, path ...string) {
+	openapiPath := "/openapi"
+	if len(path) > 0 && path[0] != "" {
+		openapiPath = path[0]
+	}
+
+	e.chiRouter.Get(openapiPath, func(w http.ResponseWriter, _ *http.Request) {
 		spec := e.GenerateOpenAPI(info)
 
 		w.Header().Set("Content-Type", "application/json")
@@ -135,6 +141,37 @@ func (e *Engine) RegisterOpenAPIHandler(path string, info Info) {
 		}
 
 		w.Write(data)
+	})
+}
+
+// RegisterDocsHandler adds a handler that serves HTML documentation powered by Scalar.
+// The docsPath defaults to "/docs" and openapiPath defaults to "/openapi".
+func (e *Engine) RegisterDocsHandler(docsPath, openapiPath string) {
+	if docsPath == "" {
+		docsPath = "/docs"
+	}
+	if openapiPath == "" {
+		openapiPath = "/openapi"
+	}
+
+	e.chiRouter.Get(docsPath, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+
+		html := fmt.Sprintf(`<!DOCTYPE html>
+<html>
+<head>
+    <title>API Documentation</title>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+</head>
+<body>
+    <script id="api-reference" data-url="%s"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@scalar/api-reference"></script>
+</body>
+</html>`, openapiPath)
+
+		w.Write([]byte(html))
 	})
 }
 

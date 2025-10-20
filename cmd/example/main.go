@@ -95,11 +95,13 @@ func main() {
 	engine.Register(helloHandler, userHandler)
 
 	// Register OpenAPI spec endpoint
-	engine.RegisterOpenAPIHandler("/openapi.json", rocco.Info{
+	info := rocco.Info{
 		Title:       "Example API",
 		Version:     "1.0.0",
 		Description: "Example Rocco HTTP API",
-	})
+	}
+	engine.RegisterOpenAPIHandler(info)
+	engine.RegisterDocsHandler("/docs", "/openapi")
 
 	// Handle shutdown signals
 	sigChan := make(chan os.Signal, 1)

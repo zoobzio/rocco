@@ -157,7 +157,7 @@ func TestEngine_RegisterOpenAPIHandler(t *testing.T) {
 		Title:   "Test API",
 		Version: "1.0.0",
 	}
-	engine.RegisterOpenAPIHandler("/openapi.json", info)
+	engine.RegisterOpenAPIHandler(info, "/openapi.json")
 
 	// Test OpenAPI endpoint
 	req := httptest.NewRequest("GET", "/openapi.json", nil)
