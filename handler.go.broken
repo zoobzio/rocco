@@ -1,0 +1,496 @@
+package rocco.
+
+import (.
+	"context".
+	"encoding/json".
+	"errors".
+	"fmt".
+	"io".
+	"net/http".
+
+	"github.com/go-chi/chi/v5".
+	"github.com/go-playground/validator/v10".
+	"github.com/zoobzio/metricz".
+	"github.com/zoobzio/sentinel".
+	"github.com/zoobzio/tracez".
+).
+
+// Metric keys.
+const (.
+	MetricRequestsTotal            metricz.Key = "handler.requests.total".
+	MetricRequestsSuccess          metricz.Key = "handler.requests.success".
+	MetricRequestsParseErrors      metricz.Key = "handler.requests.parse_errors".
+	MetricRequestsValidationErrors metricz.Key = "handler.requests.validation_errors".
+	MetricRequestsHandlerErrors    metricz.Key = "handler.requests.handler_errors".
+	MetricRequestsMarshalErrors    metricz.Key = "handler.requests.marshal_errors".
+	MetricHandlerDuration          metricz.Key = "handler.duration_ms".
+).
+
+// Trace spans.
+const (.
+	TraceHandlerProcess tracez.Key = "handler.process".
+).
+
+// Trace tags.
+const (.
+	TraceError     tracez.Tag = "error".
+	TraceErrorType tracez.Tag = "error.type".
+).
+
+// Handler wraps a typed handler function with metadata for documentation and parsing.
+// It implements RouteHandler interface.
+// The handler function receives a Request with typed input and parameters.
+type Handler[In, Out any] struct {.
+	// Core handler function receives Request with typed body.
+	fn func(*Request[In]) (Out, error).
+
+	// Handler name.
+	name string.
+
+	// Route metadata.
+	method string.
+	path   string.
+
+	// OpenAPI metadata.
+	summary     string.
+	description string.
+	tags        []string.
+
+	// Parameter specifications.
+	pathParams  []string // Required path parameter names.
+	queryParams []string // Required query parameter names.
+
+	// HTTP response.
+	successStatus   int               // Status code for successful responses (default 200).
+	responseHeaders map[string]string // Default response headers.
+	errorCodes      []int             // Declared error status codes this handler may return.
+
+	// Type metadata from sentinel.
+	InputMeta  sentinel.ModelMetadata.
+	OutputMeta sentinel.ModelMetadata.
+
+	// Observability.
+	metrics *metricz.Registry.
+	tracer  *tracez.Tracer.
+
+	// Validation.
+	validator *validator.Validate.
+}.
+
+// Process implements RouteHandler.
+func (h *Handler[In, Out]) Process(ctx context.Context, r *http.Request, w http.ResponseWriter) error {.
+	// Start trace span.
+	ctx, span := h.tracer.StartSpan(ctx, TraceHandlerProcess).
+	defer span.Finish().
+
+	// Track metrics.
+	h.metrics.Counter(MetricRequestsTotal).Inc().
+	timer := h.metrics.Timer(MetricHandlerDuration).Start().
+	defer timer.Stop().
+
+	// Extract and validate parameters.
+	params, err := h.extractParams(ctx, r).
+	if err != nil {.
+		h.metrics.Counter(MetricRequestsParseErrors).Inc().
+		span.SetTag(TraceError, "true").
+		span.SetTag(TraceErrorType, "params").
+		writeErrorResponse(w, http.StatusUnprocessableEntity).
+		return err.
+	}.
+
+	// Parse request body.
+	var input In.
+	if h.InputMeta.TypeName != "NoBody" && r.Body != nil {.
+		body, err := io.ReadAll(r.Body).
+		if err != nil {.
+			h.metrics.Counter(MetricRequestsParseErrors).Inc().
+			span.SetTag(TraceError, "true").
+			span.SetTag(TraceErrorType, "read_body").
+			writeErrorResponse(w, http.StatusBadRequest).
+			return err.
+		}.
+		r.Body.Close().
+
+		if len(body) > 0 {.
+			if err := json.Unmarshal(body, &input); err != nil {.
+				h.metrics.Counter(MetricRequestsParseErrors).Inc().
+				span.SetTag(TraceError, "true").
+				span.SetTag(TraceErrorType, "parse_body").
+				writeErrorResponse(w, http.StatusUnprocessableEntity).
+				return err.
+			}.
+
+			// Validate input.
+			if err := h.validator.Struct(input); err != nil {.
+				h.metrics.Counter(MetricRequestsValidationErrors).Inc().
+				span.SetTag(TraceError, "true").
+				span.SetTag(TraceErrorType, "validation").
+				writeValidationErrorResponse(w, err).
+				return err.
+			}.
+		}.
+	}.
+
+	// Create Request for callback.
+	req := &Request[In]{.
+		Context: ctx,.
+		Request: r,.
+		Params:  params,.
+		Body:    input,.
+	}.
+
+	// Call user handler.
+	output, err := h.fn(req).
+	if err != nil {.
+		// Check if this is a sentinel error.
+		if isSentinelError(err) {.
+			status := mapSentinelToStatus(err).
+
+			// Validate that this error code is declared.
+			if !h.isErrorCodeDeclared(status) {.
+				// Undeclared sentinel error - programming error.
+				h.metrics.Counter(MetricRequestsHandlerErrors).Inc().
+				span.SetTag(TraceError, "true").
+				span.SetTag(TraceErrorType, "undeclared_sentinel").
+				writeErrorResponse(w, http.StatusInternalServerError).
+				return fmt.Errorf("undeclared sentinel error %w (add %d to WithErrorCodes)", err, status).
+			}.
+
+			// Declared sentinel error - successful handling.
+			h.metrics.Counter(MetricRequestsSuccess).Inc().
+			writeErrorResponse(w, status).
+			return nil.
+		}.
+
+		// Real error.
+		h.metrics.Counter(MetricRequestsHandlerErrors).Inc().
+		span.SetTag(TraceError, "true").
+		span.SetTag(TraceErrorType, "handler").
+		writeErrorResponse(w, http.StatusInternalServerError).
+		return err.
+	}.
+
+	// Validate output.
+	if err := h.validator.Struct(output); err != nil {.
+		h.metrics.Counter(MetricRequestsValidationErrors).Inc().
+		span.SetTag(TraceError, "true").
+		span.SetTag(TraceErrorType, "output_validation").
+		writeErrorResponse(w, http.StatusInternalServerError).
+		return fmt.Errorf("output validation failed: %w", err).
+	}.
+
+	// Marshal response.
+	body, err := json.Marshal(output).
+	if err != nil {.
+		h.metrics.Counter(MetricRequestsMarshalErrors).Inc().
+		span.SetTag(TraceError, "true").
+		span.SetTag(TraceErrorType, "marshal").
+		writeErrorResponse(w, http.StatusInternalServerError).
+		return err.
+	}.
+
+	// Write response headers.
+	for key, value := range h.responseHeaders {.
+		w.Header().Set(key, value).
+	}.
+	w.Header().Set("Content-Type", "application/json").
+
+	// Write status and body.
+	w.WriteHeader(h.successStatus).
+	w.Write(body).
+
+	h.metrics.Counter(MetricRequestsSuccess).Inc().
+	return nil.
+}.
+
+// Name implements RouteHandler.
+func (h *Handler[In, Out]) Name() string {.
+	return h.name.
+}.
+
+// Close implements RouteHandler.
+func (h *Handler[In, Out]) Close() error {.
+	if h.tracer != nil {.
+		h.tracer.Close().
+	}.
+	return nil.
+}.
+
+// Metrics implements RouteHandler.
+func (h *Handler[In, Out]) Metrics() *metricz.Registry {.
+	return h.metrics.
+}.
+
+// Tracer implements RouteHandler.
+func (h *Handler[In, Out]) Tracer() *tracez.Tracer {.
+	return h.tracer.
+}.
+
+// Method implements RouteHandler.
+func (h *Handler[In, Out]) Method() string {.
+	return h.method.
+}.
+
+// Path implements RouteHandler.
+func (h *Handler[In, Out]) Path() string {.
+	return h.path.
+}.
+
+// Summary implements RouteHandler.
+func (h *Handler[In, Out]) Summary() string {.
+	return h.summary.
+}.
+
+// Description implements RouteHandler.
+func (h *Handler[In, Out]) Description() string {.
+	return h.description.
+}.
+
+// Tags implements RouteHandler.
+func (h *Handler[In, Out]) Tags() []string {.
+	return h.tags.
+}.
+
+// PathParams implements RouteHandler.
+func (h *Handler[In, Out]) PathParams() []string {.
+	return h.pathParams.
+}.
+
+// QueryParams implements RouteHandler.
+func (h *Handler[In, Out]) QueryParams() []string {.
+	return h.queryParams.
+}.
+
+// SuccessStatus implements RouteHandler.
+func (h *Handler[In, Out]) SuccessStatus() int {.
+	return h.successStatus.
+}.
+
+// ErrorCodes implements RouteHandler.
+func (h *Handler[In, Out]) ErrorCodes() []int {.
+	return h.errorCodes.
+}.
+
+// InputSchema implements RouteHandler.
+func (h *Handler[In, Out]) InputSchema() *Schema {.
+	return metadataToSchema(h.InputMeta).
+}.
+
+// OutputSchema implements RouteHandler.
+func (h *Handler[In, Out]) OutputSchema() *Schema {.
+	return metadataToSchema(h.OutputMeta).
+}.
+
+// InputTypeName implements RouteHandler.
+func (h *Handler[In, Out]) InputTypeName() string {.
+	return h.InputMeta.TypeName.
+}.
+
+// OutputTypeName implements RouteHandler.
+func (h *Handler[In, Out]) OutputTypeName() string {.
+	return h.OutputMeta.TypeName.
+}.
+
+// NewHandler creates a new typed handler with sentinel metadata.
+func NewHandler[In, Out any](name string, method, path string, fn func(*Request[In]) (Out, error)) *Handler[In, Out] {.
+	return &Handler[In, Out]{.
+		name:            name,.
+		method:          method,.
+		path:            path,.
+		fn:              fn,.
+		pathParams:      []string{},.
+		queryParams:     []string{},.
+		successStatus:   http.StatusOK, // Default to 200.
+		responseHeaders: make(map[string]string),.
+		InputMeta:       sentinel.Inspect[In](),.
+		OutputMeta:      sentinel.Inspect[Out](),.
+		metrics:         metricz.New(),.
+		tracer:          tracez.New(),.
+		validator:       validator.New(),.
+	}.
+}.
+
+// WithSummary sets the OpenAPI summary.
+func (h *Handler[In, Out]) WithSummary(summary string) *Handler[In, Out] {.
+	h.summary = summary.
+	return h.
+}.
+
+// WithDescription sets the OpenAPI description.
+func (h *Handler[In, Out]) WithDescription(desc string) *Handler[In, Out] {.
+	h.description = desc.
+	return h.
+}.
+
+// WithTags sets the OpenAPI tags.
+func (h *Handler[In, Out]) WithTags(tags ...string) *Handler[In, Out] {.
+	h.tags = tags.
+	return h.
+}.
+
+// WithSuccessStatus sets the HTTP status code for successful responses.
+func (h *Handler[In, Out]) WithSuccessStatus(status int) *Handler[In, Out] {.
+	h.successStatus = status.
+	return h.
+}.
+
+// WithPathParams specifies required path parameters.
+func (h *Handler[In, Out]) WithPathParams(params ...string) *Handler[In, Out] {.
+	h.pathParams = params.
+	return h.
+}.
+
+// WithQueryParams specifies required query parameters.
+func (h *Handler[In, Out]) WithQueryParams(params ...string) *Handler[In, Out] {.
+	h.queryParams = params.
+	return h.
+}.
+
+// WithResponseHeaders sets default response headers for this handler.
+func (h *Handler[In, Out]) WithResponseHeaders(headers map[string]string) *Handler[In, Out] {.
+	h.responseHeaders = headers.
+	return h.
+}.
+
+// WithErrorCodes declares which HTTP error status codes this handler may return.
+// Undeclared sentinel errors will be converted to 500 Internal Server Error.
+// This is used for OpenAPI documentation generation.
+func (h *Handler[In, Out]) WithErrorCodes(codes ...int) *Handler[In, Out] {.
+	h.errorCodes = codes.
+	return h.
+}.
+
+// extractParams extracts and validates required parameters from the request.
+func (h *Handler[In, Out]) extractParams(ctx context.Context, r *http.Request) (*Params, error) {.
+	params := &Params{.
+		Path:  make(map[string]string),.
+		Query: make(map[string]string),.
+	}.
+
+	// Extract path params from Chi router context.
+	if rctx := chi.RouteContext(ctx); rctx != nil {.
+		for i, key := range rctx.URLParams.Keys {.
+			params.Path[key] = rctx.URLParams.Values[i].
+		}.
+	}.
+
+	// Validate required path params.
+	for _, requiredParam := range h.pathParams {.
+		if _, exists := params.Path[requiredParam]; !exists {.
+			return nil, fmt.Errorf("path parameter %q", requiredParam).
+		}.
+	}.
+
+	// Extract only declared query params (if any declared).
+	if len(h.queryParams) > 0 {.
+		query := r.URL.Query().
+		for _, declaredParam := range h.queryParams {.
+			if values := query[declaredParam]; len(values) > 0 {.
+				params.Query[declaredParam] = values[0].
+			}.
+			// Missing query params result in empty string (not an error).
+		}.
+	}.
+	// If no query params declared, Query map stays empty.
+
+	return params, nil.
+}.
+
+// isSentinelError checks if an error is one of our sentinel errors.
+// that indicate specific HTTP error status codes.
+func isSentinelError(err error) bool {.
+	return errors.Is(err, ErrBadRequest) ||.
+		errors.Is(err, ErrUnauthorized) ||.
+		errors.Is(err, ErrForbidden) ||.
+		errors.Is(err, ErrNotFound) ||.
+		errors.Is(err, ErrConflict) ||.
+		errors.Is(err, ErrUnprocessableEntity) ||.
+		errors.Is(err, ErrTooManyRequests).
+}.
+
+// errorResponse represents the standard error response format.
+type errorResponse struct {.
+	Error string `json:"error"`.
+}.
+
+// Canned error responses - consistent across all handlers.
+var cannedErrorResponses = map[int][]byte{.
+	http.StatusBadRequest:          []byte(`{"error":"Bad Request"}`),.
+	http.StatusUnauthorized:        []byte(`{"error":"Unauthorized"}`),.
+	http.StatusForbidden:           []byte(`{"error":"Forbidden"}`),.
+	http.StatusNotFound:            []byte(`{"error":"Not Found"}`),.
+	http.StatusConflict:            []byte(`{"error":"Conflict"}`),.
+	http.StatusUnprocessableEntity: []byte(`{"error":"Unprocessable Entity"}`),.
+	http.StatusTooManyRequests:     []byte(`{"error":"Too Many Requests"}`),.
+	http.StatusInternalServerError: []byte(`{"error":"Internal Server Error"}`),.
+}.
+
+// mapSentinelToStatus maps sentinel errors to HTTP status codes.
+func mapSentinelToStatus(err error) int {.
+	switch {.
+	case errors.Is(err, ErrBadRequest):.
+		return http.StatusBadRequest.
+	case errors.Is(err, ErrUnauthorized):.
+		return http.StatusUnauthorized.
+	case errors.Is(err, ErrForbidden):.
+		return http.StatusForbidden.
+	case errors.Is(err, ErrNotFound):.
+		return http.StatusNotFound.
+	case errors.Is(err, ErrConflict):.
+		return http.StatusConflict.
+	case errors.Is(err, ErrUnprocessableEntity):.
+		return http.StatusUnprocessableEntity.
+	case errors.Is(err, ErrTooManyRequests):.
+		return http.StatusTooManyRequests.
+	default:.
+		return http.StatusInternalServerError.
+	}.
+}.
+
+// isErrorCodeDeclared checks if an error status code was declared via WithErrorCodes.
+func (h *Handler[In, Out]) isErrorCodeDeclared(status int) bool {.
+	for _, code := range h.errorCodes {.
+		if code == status {.
+			return true.
+		}.
+	}.
+	return false.
+}.
+
+// writeErrorResponse writes a canned JSON error response.
+func writeErrorResponse(w http.ResponseWriter, status int) {.
+	body, exists := cannedErrorResponses[status].
+	if !exists {.
+		body = cannedErrorResponses[http.StatusInternalServerError].
+		status = http.StatusInternalServerError.
+	}.
+
+	w.Header().Set("Content-Type", "application/json").
+	w.WriteHeader(status).
+	w.Write(body).
+}.
+
+// writeValidationErrorResponse writes detailed validation errors.
+func writeValidationErrorResponse(w http.ResponseWriter, err error) {.
+	w.Header().Set("Content-Type", "application/json").
+	w.WriteHeader(http.StatusUnprocessableEntity).
+
+	// Extract validation errors.
+	var validationErrors []map[string]string.
+	if ve, ok := err.(validator.ValidationErrors); ok {.
+		for _, fe := range ve {.
+			validationErrors = append(validationErrors, map[string]string{.
+				"field": fe.Field(),.
+				"tag":   fe.Tag(),.
+				"value": fmt.Sprintf("%v", fe.Value()),.
+			}).
+		}.
+	}.
+
+	response := map[string]any{.
+		"error":  "Validation failed",.
+		"fields": validationErrors,.
+	}.
+
+	json.NewEncoder(w).Encode(response).
+}.
