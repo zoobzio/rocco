@@ -4,7 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
+	"os"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -60,6 +63,8 @@ type Engine struct {
 	metrics    *metricz.Registry
 	tracer     *tracez.Tracer
 	hooks      *hookz.Hooks[*Event]
+	logger     *slog.Logger
+	loggerOnce sync.Once
 }
 
 // NewEngine creates a new Engine with the given configuration.
@@ -83,6 +88,7 @@ func NewEngine(config *EngineConfig) *Engine {
 		metrics:    metricz.New(),
 		tracer:     tracez.New(),
 		hooks:      hookz.New[*Event](),
+		logger:     nil,
 	}
 
 	// Create HTTP server
@@ -96,6 +102,24 @@ func NewEngine(config *EngineConfig) *Engine {
 	}
 
 	return e
+}
+
+// WithLogger sets the logger for the engine.
+// If not set, a default logger writing to stdout will be created on first use.
+func (e *Engine) WithLogger(logger *slog.Logger) *Engine {
+	e.logger = logger
+	return e
+}
+
+// getLogger returns the engine's logger, creating a default one if not set.
+// Thread-safe via sync.Once.
+func (e *Engine) getLogger() *slog.Logger {
+	e.loggerOnce.Do(func() {
+		if e.logger == nil {
+			e.logger = slog.New(slog.NewTextHandler(os.Stdout, nil))
+		}
+	})
+	return e.logger
 }
 
 // Use adds global middleware to Chi router.
@@ -277,7 +301,7 @@ func (e *Engine) OnShutdownComplete(handler func(context.Context, *Event) error)
 // Start begins listening for HTTP requests.
 // This method blocks until the server is shutdown.
 func (e *Engine) Start() error {
-	fmt.Printf("[Engine] Starting server on %s:%d\n", e.config.Host, e.config.Port)
+	e.getLogger().Info("starting server", "host", e.config.Host, "port", e.config.Port)
 	err := e.server.ListenAndServe()
 	if err != nil && err != http.ErrServerClosed {
 		return fmt.Errorf("server error: %w", err)
@@ -291,7 +315,7 @@ func (e *Engine) Shutdown(ctx context.Context) error {
 	_, span := e.tracer.StartSpan(ctx, TraceShutdown)
 	defer span.Finish()
 
-	fmt.Println("[Engine] Starting graceful shutdown...")
+	e.getLogger().Info("starting graceful shutdown")
 
 	// Emit shutdown started event
 	shutdownEvent := NewSystemEvent("shutdown.started", nil)
@@ -304,7 +328,7 @@ func (e *Engine) Shutdown(ctx context.Context) error {
 	e.cancel()
 
 	if err != nil {
-		fmt.Printf("[Engine] Shutdown error: %v\n", err)
+		e.getLogger().Error("shutdown error", "error", err)
 		// Emit shutdown complete event (with error)
 		errorEvent := NewSystemEvent("shutdown.complete", map[string]any{
 			"graceful": false,
@@ -314,7 +338,7 @@ func (e *Engine) Shutdown(ctx context.Context) error {
 		return err
 	}
 
-	fmt.Println("[Engine] Graceful shutdown complete")
+	e.getLogger().Info("graceful shutdown complete")
 
 	// Emit shutdown complete event
 	completeEvent := NewSystemEvent("shutdown.complete", map[string]any{

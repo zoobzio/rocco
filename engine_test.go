@@ -341,6 +341,9 @@ func TestEngine_OnShutdownStarted(t *testing.T) {
 	defer cancel()
 	engine.Shutdown(ctx)
 
+	// Wait for async hooks to complete
+	engine.Hooks().Close()
+
 	if !called.Load() {
 		t.Error("OnShutdownStarted hook was not called")
 	}
