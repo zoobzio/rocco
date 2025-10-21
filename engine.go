@@ -53,18 +53,19 @@ const (
 )
 
 type Engine struct {
-	config     *EngineConfig
-	server     *http.Server
-	chiRouter  chi.Router
-	middleware []func(http.Handler) http.Handler
-	handlers   []RouteHandler // Registered handlers for OpenAPI generation
-	ctx        context.Context
-	cancel     context.CancelFunc
-	metrics    *metricz.Registry
-	tracer     *tracez.Tracer
-	hooks      *hookz.Hooks[*Event]
-	logger     *slog.Logger
-	loggerOnce sync.Once
+	config              *EngineConfig
+	server              *http.Server
+	chiRouter           chi.Router
+	middleware          []func(http.Handler) http.Handler
+	handlers            []RouteHandler // Registered handlers for OpenAPI generation
+	ctx                 context.Context
+	cancel              context.CancelFunc
+	metrics             *metricz.Registry
+	tracer              *tracez.Tracer
+	hooks               *hookz.Hooks[*Event]
+	logger              *slog.Logger
+	loggerOnce          sync.Once
+	defaultHandlersOnce sync.Once
 }
 
 // NewEngine creates a new Engine with the given configuration.
@@ -122,15 +123,19 @@ func (e *Engine) getLogger() *slog.Logger {
 	return e.logger
 }
 
-// Use adds global middleware to Chi router.
-func (e *Engine) Use(middleware ...func(http.Handler) http.Handler) {
+// WithMiddleware adds global middleware to the engine and returns the engine for chaining.
+func (e *Engine) WithMiddleware(middleware ...func(http.Handler) http.Handler) *Engine {
 	for _, mw := range middleware {
 		e.chiRouter.Use(mw)
 	}
+	return e
 }
 
-// Register adds one or more RouteHandlers to the engine.
-func (e *Engine) Register(handlers ...RouteHandler) {
+// WithHandlers adds one or more RouteHandlers to the engine and returns the engine for chaining.
+func (e *Engine) WithHandlers(handlers ...RouteHandler) *Engine {
+	// Ensure default handlers are registered first (only once)
+	e.ensureDefaultHandlers()
+
 	for _, handler := range handlers {
 		// Store handler for OpenAPI generation.
 		e.handlers = append(e.handlers, handler)
@@ -147,24 +152,30 @@ func (e *Engine) Register(handlers ...RouteHandler) {
 			e.chiRouter.Method(handler.Method(), handler.Path(), httpHandler)
 		}
 	}
+	return e
 }
 
-// RegisterOpenAPIHandler adds a handler that serves the OpenAPI specification as JSON.
-// If path is not provided, defaults to "/openapi".
-func (e *Engine) RegisterOpenAPIHandler(info Info, path ...string) {
-	openapiPath := "/openapi"
-	if len(path) > 0 && path[0] != "" {
-		openapiPath = path[0]
-	}
+// ensureDefaultHandlers sets up OpenAPI spec and docs handlers at /openapi and /docs (once).
+func (e *Engine) ensureDefaultHandlers() {
+	e.defaultHandlersOnce.Do(func() {
+		e.registerDefaultHandlers()
+	})
+}
 
-	e.chiRouter.Get(openapiPath, func(w http.ResponseWriter, _ *http.Request) {
-		spec := e.GenerateOpenAPI(info)
+// registerDefaultHandlers sets up OpenAPI spec and docs handlers at /openapi and /docs.
+func (e *Engine) registerDefaultHandlers() {
+	// OpenAPI spec handler at /openapi
+	e.chiRouter.Get("/openapi", func(w http.ResponseWriter, _ *http.Request) {
+		spec := e.GenerateOpenAPI(Info{
+			Title:   "API",
+			Version: "1.0.0",
+		})
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 
-		// Marshal to JSON.
-		data, err := json.Marshal(spec)
+		// Marshal to pretty-printed JSON.
+		data, err := json.MarshalIndent(spec, "", "  ")
 		if err != nil {
 			http.Error(w, "failed to generate OpenAPI spec", http.StatusInternalServerError)
 			return
@@ -172,23 +183,13 @@ func (e *Engine) RegisterOpenAPIHandler(info Info, path ...string) {
 
 		w.Write(data)
 	})
-}
 
-// RegisterDocsHandler adds a handler that serves HTML documentation powered by Scalar.
-// The docsPath defaults to "/docs" and openapiPath defaults to "/openapi".
-func (e *Engine) RegisterDocsHandler(docsPath, openapiPath string) {
-	if docsPath == "" {
-		docsPath = "/docs"
-	}
-	if openapiPath == "" {
-		openapiPath = "/openapi"
-	}
-
-	e.chiRouter.Get(docsPath, func(w http.ResponseWriter, _ *http.Request) {
+	// Docs handler at /docs
+	e.chiRouter.Get("/docs", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
 
-		html := fmt.Sprintf(`<!DOCTYPE html>
+		html := `<!DOCTYPE html>
 <html>
 <head>
     <title>API Documentation</title>
@@ -196,10 +197,10 @@ func (e *Engine) RegisterDocsHandler(docsPath, openapiPath string) {
     <meta name="viewport" content="width=device-width, initial-scale=1" />
 </head>
 <body>
-    <script id="api-reference" data-url="%s"></script>
+    <script id="api-reference" data-url="/openapi"></script>
     <script src="https://cdn.jsdelivr.net/npm/@scalar/api-reference"></script>
 </body>
-</html>`, openapiPath)
+</html>`
 
 		w.Write([]byte(html))
 	})

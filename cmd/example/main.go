@@ -92,16 +92,9 @@ func main() {
 		WithQueryParams("verbose"). // Declares optional query param
 		WithErrorCodes(404)         // Declares this handler may return 404
 
-	engine.Register(helloHandler, userHandler)
+	engine.WithHandlers(helloHandler, userHandler)
 
-	// Register OpenAPI spec endpoint
-	info := rocco.Info{
-		Title:       "Example API",
-		Version:     "1.0.0",
-		Description: "Example Rocco HTTP API",
-	}
-	engine.RegisterOpenAPIHandler(info)
-	engine.RegisterDocsHandler("/docs", "/openapi")
+	// OpenAPI spec and docs are automatically available at /openapi and /docs
 
 	// Handle shutdown signals
 	sigChan := make(chan os.Signal, 1)

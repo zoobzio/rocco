@@ -9,7 +9,7 @@ require (
 	github.com/go-playground/validator/v10 v10.28.0
 	github.com/zoobzio/hookz v0.0.6
 	github.com/zoobzio/metricz v0.0.2
-	github.com/zoobzio/sentinel v0.0.4
+	github.com/zoobzio/sentinel v0.0.5
 	github.com/zoobzio/tracez v0.0.13
 )
 

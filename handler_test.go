@@ -479,7 +479,7 @@ func TestHandler_Use(t *testing.T) {
 		func(_ *Request[NoBody]) (testOutput, error) {
 			return testOutput{Message: "OK"}, nil
 		},
-	).Use(middleware)
+	).WithMiddleware(middleware)
 
 	if len(handler.Middleware()) != 1 {
 		t.Errorf("expected 1 middleware, got %d", len(handler.Middleware()))
@@ -505,7 +505,7 @@ func TestHandler_UseMultiple(t *testing.T) {
 		func(_ *Request[NoBody]) (testOutput, error) {
 			return testOutput{}, nil
 		},
-	).Use(mw1, mw2)
+	).WithMiddleware(mw1, mw2)
 
 	if len(handler.Middleware()) != 2 {
 		t.Errorf("expected 2 middleware, got %d", len(handler.Middleware()))

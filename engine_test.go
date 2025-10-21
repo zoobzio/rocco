@@ -59,7 +59,7 @@ func TestEngine_Use(t *testing.T) {
 		})
 	}
 
-	engine.Use(middleware)
+	engine.WithMiddleware(middleware)
 
 	// Register a simple handler
 	handler := NewHandler[NoBody, testOutput](
@@ -70,7 +70,7 @@ func TestEngine_Use(t *testing.T) {
 			return testOutput{Message: "OK"}, nil
 		},
 	)
-	engine.Register(handler)
+	engine.WithHandlers(handler)
 
 	// Test middleware is called
 	req := httptest.NewRequest("GET", "/test", nil)
@@ -94,7 +94,7 @@ func TestEngine_Register(t *testing.T) {
 		},
 	)
 
-	engine.Register(handler)
+	engine.WithHandlers(handler)
 
 	if len(engine.handlers) != 1 {
 		t.Errorf("expected 1 handler registered, got %d", len(engine.handlers))
@@ -131,7 +131,7 @@ func TestEngine_RegisterMultiple(t *testing.T) {
 		},
 	)
 
-	engine.Register(handler1, handler2)
+	engine.WithHandlers(handler1, handler2)
 
 	if len(engine.handlers) != 2 {
 		t.Errorf("expected 2 handlers registered, got %d", len(engine.handlers))
@@ -150,17 +150,10 @@ func TestEngine_RegisterOpenAPIHandler(t *testing.T) {
 			return testOutput{}, nil
 		},
 	)
-	engine.Register(handler)
+	engine.WithHandlers(handler)
 
-	// Register OpenAPI handler
-	info := Info{
-		Title:   "Test API",
-		Version: "1.0.0",
-	}
-	engine.RegisterOpenAPIHandler(info, "/openapi.json")
-
-	// Test OpenAPI endpoint
-	req := httptest.NewRequest("GET", "/openapi.json", nil)
+	// Test default OpenAPI endpoint at /openapi
+	req := httptest.NewRequest("GET", "/openapi", nil)
 	w := httptest.NewRecorder()
 	engine.chiRouter.ServeHTTP(w, req)
 
@@ -176,8 +169,11 @@ func TestEngine_RegisterOpenAPIHandler(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to parse OpenAPI spec: %v", err)
 	}
-	if spec.Info.Title != "Test API" {
-		t.Errorf("expected title 'Test API', got %q", spec.Info.Title)
+	if spec.Info.Title != "API" {
+		t.Errorf("expected title 'API', got %q", spec.Info.Title)
+	}
+	if spec.Info.Version != "1.0.0" {
+		t.Errorf("expected version '1.0.0', got %q", spec.Info.Version)
 	}
 }
 
@@ -230,7 +226,7 @@ func TestEngine_OnRequestReceived(t *testing.T) {
 			return testOutput{}, nil
 		},
 	)
-	engine.Register(handler)
+	engine.WithHandlers(handler)
 
 	req := httptest.NewRequest("GET", "/test", nil)
 	w := httptest.NewRecorder()
@@ -265,7 +261,7 @@ func TestEngine_OnRequestCompleted(t *testing.T) {
 			return testOutput{}, nil
 		},
 	)
-	engine.Register(handler)
+	engine.WithHandlers(handler)
 
 	req := httptest.NewRequest("GET", "/test", nil)
 	w := httptest.NewRecorder()
@@ -301,7 +297,7 @@ func TestEngine_OnRequestRejected(t *testing.T) {
 			return testOutput{}, ErrInternalServer
 		},
 	)
-	engine.Register(handler)
+	engine.WithHandlers(handler)
 
 	req := httptest.NewRequest("GET", "/test", nil)
 	w := httptest.NewRecorder()
@@ -436,9 +432,9 @@ func TestEngine_Register_HandlerMiddleware(t *testing.T) {
 		func(_ *Request[NoBody]) (testOutput, error) {
 			return testOutput{Message: "OK"}, nil
 		},
-	).Use(middleware)
+	).WithMiddleware(middleware)
 
-	engine.Register(handler)
+	engine.WithHandlers(handler)
 
 	// Test that handler middleware is applied
 	req := httptest.NewRequest("GET", "/test", nil)
@@ -483,9 +479,9 @@ func TestEngine_Register_HandlerMiddlewareOrder(t *testing.T) {
 			callOrder = append(callOrder, "handler")
 			return testOutput{Message: "OK"}, nil
 		},
-	).Use(mw1, mw2)
+	).WithMiddleware(mw1, mw2)
 
-	engine.Register(handler)
+	engine.WithHandlers(handler)
 
 	req := httptest.NewRequest("GET", "/test", nil)
 	w := httptest.NewRecorder()
@@ -511,7 +507,7 @@ func TestEngine_Register_HandlerAndEngineMiddleware(t *testing.T) {
 			next.ServeHTTP(w, r)
 		})
 	}
-	engine.Use(engineMw)
+	engine.WithMiddleware(engineMw)
 
 	// Handler-level middleware
 	handlerMw := func(next http.Handler) http.Handler {
@@ -529,9 +525,9 @@ func TestEngine_Register_HandlerAndEngineMiddleware(t *testing.T) {
 			callOrder = append(callOrder, "handler")
 			return testOutput{Message: "OK"}, nil
 		},
-	).Use(handlerMw)
+	).WithMiddleware(handlerMw)
 
-	engine.Register(handler)
+	engine.WithHandlers(handler)
 
 	req := httptest.NewRequest("GET", "/test", nil)
 	w := httptest.NewRecorder()
@@ -559,7 +555,7 @@ func TestEngine_Register_NoHandlerMiddleware(t *testing.T) {
 	)
 
 	// Should not panic with no middleware
-	engine.Register(handler)
+	engine.WithHandlers(handler)
 
 	req := httptest.NewRequest("GET", "/test", nil)
 	w := httptest.NewRecorder()

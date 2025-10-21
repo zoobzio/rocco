@@ -325,8 +325,8 @@ func NewHandler[In, Out any](name string, method, path string, fn func(*Request[
 		successStatus:   http.StatusOK, // Default to 200.
 		responseHeaders: make(map[string]string),
 		maxBodySize:     10 * 1024 * 1024, // Default to 10MB.
-		InputMeta:       sentinel.Inspect[In](),
-		OutputMeta:      sentinel.Inspect[Out](),
+		InputMeta:       sentinel.Scan[In](),
+		OutputMeta:      sentinel.Scan[Out](),
 		metrics:         metricz.New(),
 		tracer:          tracez.New(),
 		logger:          nil,
@@ -407,8 +407,8 @@ func (h *Handler[In, Out]) WithMaxBodySize(size int64) *Handler[In, Out] {
 	return h
 }
 
-// Use adds middleware to this handler.
-func (h *Handler[In, Out]) Use(middleware ...func(http.Handler) http.Handler) *Handler[In, Out] {
+// WithMiddleware adds middleware to this handler and returns the handler for chaining.
+func (h *Handler[In, Out]) WithMiddleware(middleware ...func(http.Handler) http.Handler) *Handler[In, Out] {
 	h.middleware = append(h.middleware, middleware...)
 	return h
 }

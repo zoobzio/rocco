@@ -73,7 +73,7 @@ func main() {
         WithSuccessStatus(201).
         WithErrorCodes(400, 422)
 
-    engine.Register(handler)
+    engine.WithHandlers(handler)
 
     // Optional: OpenAPI spec endpoint
     engine.RegisterOpenAPIHandler("/openapi.json", rocco.Info{
@@ -193,9 +193,9 @@ import (
 engine := rocco.NewEngine(rocco.DefaultConfig())
 
 // Engine-level middleware (applies to all handlers)
-engine.Use(middleware.Logger)
-engine.Use(middleware.Recoverer)
-engine.Use(middleware.RequestID)
+engine.WithMiddleware(middleware.Logger)
+engine.WithMiddleware(middleware.Recoverer)
+engine.WithMiddleware(middleware.RequestID)
 
 // Handler-level middleware (applies to specific handler only)
 handler := rocco.NewHandler[CreateUserInput, UserOutput](
@@ -210,7 +210,7 @@ handler := rocco.NewHandler[CreateUserInput, UserOutput](
     Use(customAuthMiddleware)
 
 // Register handlers
-engine.Register(handler)
+engine.WithHandlers(handler)
 ```
 
 Middleware execution order: engine middleware runs first, then handler middleware, then the handler function.

@@ -270,7 +270,7 @@ func TestGenerateOpenAPI(t *testing.T) {
 		},
 	).WithSummary("Create test").WithTags("test").WithErrorCodes(400, 404)
 
-	engine.Register(handler1, handler2)
+	engine.WithHandlers(handler1, handler2)
 
 	// Generate OpenAPI spec
 	info := Info{
@@ -359,7 +359,7 @@ func TestGenerateOpenAPI_PathParams(t *testing.T) {
 		},
 	).WithPathParams("id")
 
-	engine.Register(handler)
+	engine.WithHandlers(handler)
 
 	spec := engine.GenerateOpenAPI(Info{Title: "Test", Version: "1.0.0"})
 
@@ -395,7 +395,7 @@ func TestGenerateOpenAPI_QueryParams(t *testing.T) {
 		},
 	).WithQueryParams("page", "limit")
 
-	engine.Register(handler)
+	engine.WithHandlers(handler)
 
 	spec := engine.GenerateOpenAPI(Info{Title: "Test", Version: "1.0.0"})
 
