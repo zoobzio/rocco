@@ -224,6 +224,53 @@ The spec includes:
 - Error responses
 - Tags and descriptions
 
+#### OpenAPI Schema Tags
+
+Enrich your OpenAPI documentation with struct tags. Rocco extracts these tags automatically via [sentinel](https://github.com/zoobzio/sentinel):
+
+```go
+type CreateUserInput struct {
+    Name  string `json:"name" description:"User's full name" example:"John Doe" minLength:"2" maxLength:"50"`
+    Email string `json:"email" description:"User email address" format:"email" example:"user@example.com" pattern:"^[^@]+@[^@]+\.[^@]+$"`
+    Age   int    `json:"age" description:"User age in years" minimum:"18" maximum:"120" example:"25"`
+    Role  string `json:"role" description:"User role" enum:"admin,user,guest" example:"user"`
+}
+```
+
+**Supported tags:**
+
+| Tag | Type | Description | Example |
+|-----|------|-------------|---------|
+| `description` | string | Field description | `description:"User's full name"` |
+| `example` | any | Example value | `example:"John Doe"` |
+| `format` | string | Data format (e.g., email, uri, date-time) | `format:"email"` |
+| `pattern` | string | Regex pattern | `pattern:"^[a-z]+$"` |
+| `enum` | string | Comma-separated allowed values | `enum:"red,green,blue"` |
+| `minimum` | number | Minimum numeric value | `minimum:"0"` |
+| `maximum` | number | Maximum numeric value | `maximum:"100"` |
+| `multipleOf` | number | Number must be multiple of | `multipleOf:"5"` |
+| `minLength` | integer | Minimum string length | `minLength:"3"` |
+| `maxLength` | integer | Maximum string length | `maxLength:"50"` |
+| `minItems` | integer | Minimum array items | `minItems:"1"` |
+| `maxItems` | integer | Maximum array items | `maxItems:"10"` |
+| `uniqueItems` | boolean | Array items must be unique | `uniqueItems:"true"` |
+| `nullable` | boolean | Value can be null | `nullable:"true"` |
+| `readOnly` | boolean | Read-only field | `readOnly:"true"` |
+| `writeOnly` | boolean | Write-only field | `writeOnly:"true"` |
+| `deprecated` | boolean | Field is deprecated | `deprecated:"true"` |
+
+**Examples are type-aware:**
+- String fields: `example:"hello"` → `"hello"`
+- Integer fields: `example:"42"` → `42`
+- Number fields: `example:"3.14"` → `3.14`
+- Boolean fields: `example:"true"` → `true`
+- Array fields: `example:"a,b,c"` → `["a", "b", "c"]`
+
+**Enum values are type-aware:**
+- String: `enum:"red,green,blue"` → `["red", "green", "blue"]`
+- Integer: `enum:"1,2,3"` → `[1, 2, 3]`
+- Number: `enum:"1.5,2.5,3.5"` → `[1.5, 2.5, 3.5]`
+
 ### Observability
 
 Built-in metrics, tracing, and hooks:

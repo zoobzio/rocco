@@ -422,3 +422,428 @@ func TestGenerateOpenAPI_QueryParams(t *testing.T) {
 		t.Error("expected 'page' and 'limit' parameters")
 	}
 }
+
+func TestApplyOpenAPITags_Description(t *testing.T) {
+	field := sentinel.FieldMetadata{
+		Name: "Name",
+		Type: "string",
+		Tags: map[string]string{
+			"description": "User's full name",
+		},
+	}
+
+	schema := &Schema{Type: "string"}
+	applyOpenAPITags(schema, field)
+
+	if schema.Description != "User's full name" {
+		t.Errorf("expected description 'User's full name', got %q", schema.Description)
+	}
+}
+
+func TestApplyOpenAPITags_Format(t *testing.T) {
+	field := sentinel.FieldMetadata{
+		Name: "Email",
+		Type: "string",
+		Tags: map[string]string{
+			"format": "email",
+		},
+	}
+
+	schema := &Schema{Type: "string"}
+	applyOpenAPITags(schema, field)
+
+	if schema.Format != "email" {
+		t.Errorf("expected format 'email', got %q", schema.Format)
+	}
+}
+
+func TestApplyOpenAPITags_Example(t *testing.T) {
+	tests := []struct {
+		name         string
+		schemaType   string
+		exampleValue string
+		want         any
+	}{
+		{"string", "string", "hello", "hello"},
+		{"integer", "integer", "42", 42},
+		{"number", "number", "3.14", 3.14},
+		{"boolean", "boolean", "true", true},
+		{"array", "array", "a,b,c", []any{"a", "b", "c"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			field := sentinel.FieldMetadata{
+				Name: "Field",
+				Type: tt.schemaType,
+				Tags: map[string]string{
+					"example": tt.exampleValue,
+				},
+			}
+
+			schema := &Schema{Type: tt.schemaType}
+			applyOpenAPITags(schema, field)
+
+			if schema.Example == nil {
+				t.Fatal("expected example to be set")
+			}
+
+			// Compare based on type
+			switch want := tt.want.(type) {
+			case string:
+				if got, ok := schema.Example.(string); !ok || got != want {
+					t.Errorf("expected example %v, got %v", want, schema.Example)
+				}
+			case int:
+				if got, ok := schema.Example.(int); !ok || got != want {
+					t.Errorf("expected example %v, got %v", want, schema.Example)
+				}
+			case float64:
+				if got, ok := schema.Example.(float64); !ok || got != want {
+					t.Errorf("expected example %v, got %v", want, schema.Example)
+				}
+			case bool:
+				if got, ok := schema.Example.(bool); !ok || got != want {
+					t.Errorf("expected example %v, got %v", want, schema.Example)
+				}
+			}
+		})
+	}
+}
+
+func TestApplyOpenAPITags_Pattern(t *testing.T) {
+	field := sentinel.FieldMetadata{
+		Name: "Username",
+		Type: "string",
+		Tags: map[string]string{
+			"pattern": "^[a-z0-9_]+$",
+		},
+	}
+
+	schema := &Schema{Type: "string"}
+	applyOpenAPITags(schema, field)
+
+	if schema.Pattern != "^[a-z0-9_]+$" {
+		t.Errorf("expected pattern '^[a-z0-9_]+$', got %q", schema.Pattern)
+	}
+}
+
+func TestApplyOpenAPITags_Enum(t *testing.T) {
+	tests := []struct {
+		name       string
+		schemaType string
+		enumValue  string
+		wantLen    int
+	}{
+		{"string", "string", "red,green,blue", 3},
+		{"integer", "integer", "1,2,3", 3},
+		{"number", "number", "1.5,2.5,3.5", 3},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			field := sentinel.FieldMetadata{
+				Name: "Field",
+				Type: tt.schemaType,
+				Tags: map[string]string{
+					"enum": tt.enumValue,
+				},
+			}
+
+			schema := &Schema{Type: tt.schemaType}
+			applyOpenAPITags(schema, field)
+
+			if len(schema.Enum) != tt.wantLen {
+				t.Errorf("expected %d enum values, got %d", tt.wantLen, len(schema.Enum))
+			}
+		})
+	}
+}
+
+func TestApplyOpenAPITags_NumericValidations(t *testing.T) {
+	field := sentinel.FieldMetadata{
+		Name: "Age",
+		Type: "integer",
+		Tags: map[string]string{
+			"minimum":    "0",
+			"maximum":    "120",
+			"multipleOf": "5",
+		},
+	}
+
+	schema := &Schema{Type: "integer"}
+	applyOpenAPITags(schema, field)
+
+	if schema.Minimum == nil || *schema.Minimum != 0 {
+		t.Errorf("expected minimum 0, got %v", schema.Minimum)
+	}
+	if schema.Maximum == nil || *schema.Maximum != 120 {
+		t.Errorf("expected maximum 120, got %v", schema.Maximum)
+	}
+	if schema.MultipleOf == nil || *schema.MultipleOf != 5 {
+		t.Errorf("expected multipleOf 5, got %v", schema.MultipleOf)
+	}
+}
+
+func TestApplyOpenAPITags_StringValidations(t *testing.T) {
+	field := sentinel.FieldMetadata{
+		Name: "Username",
+		Type: "string",
+		Tags: map[string]string{
+			"minLength": "3",
+			"maxLength": "20",
+		},
+	}
+
+	schema := &Schema{Type: "string"}
+	applyOpenAPITags(schema, field)
+
+	if schema.MinLength == nil || *schema.MinLength != 3 {
+		t.Errorf("expected minLength 3, got %v", schema.MinLength)
+	}
+	if schema.MaxLength == nil || *schema.MaxLength != 20 {
+		t.Errorf("expected maxLength 20, got %v", schema.MaxLength)
+	}
+}
+
+func TestApplyOpenAPITags_ArrayValidations(t *testing.T) {
+	field := sentinel.FieldMetadata{
+		Name: "Tags",
+		Type: "[]string",
+		Tags: map[string]string{
+			"minItems":    "1",
+			"maxItems":    "10",
+			"uniqueItems": "true",
+		},
+	}
+
+	schema := &Schema{Type: "array"}
+	applyOpenAPITags(schema, field)
+
+	if schema.MinItems == nil || *schema.MinItems != 1 {
+		t.Errorf("expected minItems 1, got %v", schema.MinItems)
+	}
+	if schema.MaxItems == nil || *schema.MaxItems != 10 {
+		t.Errorf("expected maxItems 10, got %v", schema.MaxItems)
+	}
+	if schema.UniqueItems == nil || *schema.UniqueItems != true {
+		t.Errorf("expected uniqueItems true, got %v", schema.UniqueItems)
+	}
+}
+
+func TestApplyOpenAPITags_BooleanFlags(t *testing.T) {
+	field := sentinel.FieldMetadata{
+		Name: "ID",
+		Type: "string",
+		Tags: map[string]string{
+			"readOnly":   "true",
+			"nullable":   "false",
+			"deprecated": "true",
+		},
+	}
+
+	schema := &Schema{Type: "string"}
+	applyOpenAPITags(schema, field)
+
+	if schema.ReadOnly == nil || *schema.ReadOnly != true {
+		t.Errorf("expected readOnly true, got %v", schema.ReadOnly)
+	}
+	if schema.Nullable == nil || *schema.Nullable != false {
+		t.Errorf("expected nullable false, got %v", schema.Nullable)
+	}
+	if schema.Deprecated == nil || *schema.Deprecated != true {
+		t.Errorf("expected deprecated true, got %v", schema.Deprecated)
+	}
+}
+
+func TestApplyOpenAPITags_MultipleTagsCombined(t *testing.T) {
+	field := sentinel.FieldMetadata{
+		Name: "Email",
+		Type: "string",
+		Tags: map[string]string{
+			"description": "User email address",
+			"format":      "email",
+			"example":     "user@example.com",
+			"pattern":     "^[^@]+@[^@]+\\.[^@]+$",
+			"minLength":   "5",
+			"maxLength":   "100",
+		},
+	}
+
+	schema := &Schema{Type: "string"}
+	applyOpenAPITags(schema, field)
+
+	if schema.Description != "User email address" {
+		t.Errorf("expected description, got %q", schema.Description)
+	}
+	if schema.Format != "email" {
+		t.Errorf("expected format email, got %q", schema.Format)
+	}
+	if schema.Example != "user@example.com" {
+		t.Errorf("expected example, got %v", schema.Example)
+	}
+	if schema.Pattern != "^[^@]+@[^@]+\\.[^@]+$" {
+		t.Errorf("expected pattern, got %q", schema.Pattern)
+	}
+	if schema.MinLength == nil || *schema.MinLength != 5 {
+		t.Errorf("expected minLength 5, got %v", schema.MinLength)
+	}
+	if schema.MaxLength == nil || *schema.MaxLength != 100 {
+		t.Errorf("expected maxLength 100, got %v", schema.MaxLength)
+	}
+}
+
+func TestParseFloat64(t *testing.T) {
+	tests := []struct {
+		input string
+		want  *float64
+	}{
+		{"", nil},
+		{"invalid", nil},
+		{"3.14", float64Ptr(3.14)},
+		{"0", float64Ptr(0)},
+		{"-10.5", float64Ptr(-10.5)},
+	}
+
+	for _, tt := range tests {
+		got := parseFloat64(tt.input)
+		if (got == nil) != (tt.want == nil) {
+			t.Errorf("parseFloat64(%q) = %v, want %v", tt.input, got, tt.want)
+		} else if got != nil && *got != *tt.want {
+			t.Errorf("parseFloat64(%q) = %v, want %v", tt.input, *got, *tt.want)
+		}
+	}
+}
+
+func TestParseInt(t *testing.T) {
+	tests := []struct {
+		input string
+		want  *int
+	}{
+		{"", nil},
+		{"invalid", nil},
+		{"42", intPtr(42)},
+		{"0", intPtr(0)},
+		{"-10", intPtr(-10)},
+	}
+
+	for _, tt := range tests {
+		got := parseInt(tt.input)
+		if (got == nil) != (tt.want == nil) {
+			t.Errorf("parseInt(%q) = %v, want %v", tt.input, got, tt.want)
+		} else if got != nil && *got != *tt.want {
+			t.Errorf("parseInt(%q) = %v, want %v", tt.input, *got, *tt.want)
+		}
+	}
+}
+
+func TestParseBool(t *testing.T) {
+	tests := []struct {
+		input string
+		want  *bool
+	}{
+		{"", nil},
+		{"invalid", nil},
+		{"true", boolPtr(true)},
+		{"false", boolPtr(false)},
+		{"1", boolPtr(true)},
+		{"0", boolPtr(false)},
+	}
+
+	for _, tt := range tests {
+		got := parseBool(tt.input)
+		if (got == nil) != (tt.want == nil) {
+			t.Errorf("parseBool(%q) = %v, want %v", tt.input, got, tt.want)
+		} else if got != nil && *got != *tt.want {
+			t.Errorf("parseBool(%q) = %v, want %v", tt.input, *got, *tt.want)
+		}
+	}
+}
+
+func TestParseEnum(t *testing.T) {
+	tests := []struct {
+		name       string
+		value      string
+		schemaType string
+		wantLen    int
+	}{
+		{"empty", "", "string", 0},
+		{"string", "red,green,blue", "string", 3},
+		{"integer", "1,2,3", "integer", 3},
+		{"number", "1.5,2.5", "number", 2},
+		{"boolean", "true,false", "boolean", 2},
+		{"with spaces", "a, b, c", "string", 3},
+		{"with empty", "a,,b", "string", 2},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := parseEnum(tt.value, tt.schemaType)
+			if (got == nil && tt.wantLen > 0) || (got != nil && len(got) != tt.wantLen) {
+				t.Errorf("parseEnum(%q, %q) length = %v, want %d", tt.value, tt.schemaType, len(got), tt.wantLen)
+			}
+		})
+	}
+}
+
+func TestParseExample(t *testing.T) {
+	tests := []struct {
+		name       string
+		value      string
+		schemaType string
+		wantType   string
+	}{
+		{"string", "hello", "string", "string"},
+		{"integer", "42", "integer", "int"},
+		{"number", "3.14", "number", "float64"},
+		{"boolean true", "true", "boolean", "bool"},
+		{"boolean false", "false", "boolean", "bool"},
+		{"array", "a,b,c", "array", "slice"},
+		{"empty", "", "string", "nil"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := parseExample(tt.value, tt.schemaType)
+
+			if tt.wantType == "nil" {
+				if got != nil {
+					t.Errorf("parseExample(%q, %q) = %v, want nil", tt.value, tt.schemaType, got)
+				}
+				return
+			}
+
+			if got == nil {
+				t.Fatalf("parseExample(%q, %q) = nil, want %s", tt.value, tt.schemaType, tt.wantType)
+			}
+
+			switch tt.wantType {
+			case "string":
+				if _, ok := got.(string); !ok {
+					t.Errorf("parseExample(%q, %q) type = %T, want string", tt.value, tt.schemaType, got)
+				}
+			case "int":
+				if _, ok := got.(int); !ok {
+					t.Errorf("parseExample(%q, %q) type = %T, want int", tt.value, tt.schemaType, got)
+				}
+			case "float64":
+				if _, ok := got.(float64); !ok {
+					t.Errorf("parseExample(%q, %q) type = %T, want float64", tt.value, tt.schemaType, got)
+				}
+			case "bool":
+				if _, ok := got.(bool); !ok {
+					t.Errorf("parseExample(%q, %q) type = %T, want bool", tt.value, tt.schemaType, got)
+				}
+			case "slice":
+				if _, ok := got.([]any); !ok {
+					t.Errorf("parseExample(%q, %q) type = %T, want []any", tt.value, tt.schemaType, got)
+				}
+			}
+		})
+	}
+}
+
+// Helper functions to create pointers
+func intPtr(i int) *int             { return &i }
+func float64Ptr(f float64) *float64 { return &f }
+func boolPtr(b bool) *bool          { return &b }

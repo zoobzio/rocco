@@ -97,6 +97,26 @@ type Schema struct {
 	Ref                  string             `json:"$ref,omitempty" yaml:"$ref,omitempty"`
 	AdditionalProperties any                `json:"additionalProperties,omitempty" yaml:"additionalProperties,omitempty"`
 	Example              any                `json:"example,omitempty" yaml:"example,omitempty"`
+	// Numeric validations
+	Minimum          *float64 `json:"minimum,omitempty" yaml:"minimum,omitempty"`
+	Maximum          *float64 `json:"maximum,omitempty" yaml:"maximum,omitempty"`
+	ExclusiveMinimum *bool    `json:"exclusiveMinimum,omitempty" yaml:"exclusiveMinimum,omitempty"`
+	ExclusiveMaximum *bool    `json:"exclusiveMaximum,omitempty" yaml:"exclusiveMaximum,omitempty"`
+	MultipleOf       *float64 `json:"multipleOf,omitempty" yaml:"multipleOf,omitempty"`
+	// String validations
+	MinLength *int   `json:"minLength,omitempty" yaml:"minLength,omitempty"`
+	MaxLength *int   `json:"maxLength,omitempty" yaml:"maxLength,omitempty"`
+	Pattern   string `json:"pattern,omitempty" yaml:"pattern,omitempty"`
+	// Array validations
+	MinItems    *int  `json:"minItems,omitempty" yaml:"minItems,omitempty"`
+	MaxItems    *int  `json:"maxItems,omitempty" yaml:"maxItems,omitempty"`
+	UniqueItems *bool `json:"uniqueItems,omitempty" yaml:"uniqueItems,omitempty"`
+	// Enumeration and constraints
+	Enum       []any `json:"enum,omitempty" yaml:"enum,omitempty"`
+	Nullable   *bool `json:"nullable,omitempty" yaml:"nullable,omitempty"`
+	ReadOnly   *bool `json:"readOnly,omitempty" yaml:"readOnly,omitempty"`
+	WriteOnly  *bool `json:"writeOnly,omitempty" yaml:"writeOnly,omitempty"`
+	Deprecated *bool `json:"deprecated,omitempty" yaml:"deprecated,omitempty"`
 }
 
 // Components holds reusable objects for the specification

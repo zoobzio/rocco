@@ -2,10 +2,192 @@ package rocco
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/zoobzio/sentinel"
 )
+
+func init() {
+	// Register OpenAPI tags with sentinel for extraction
+	sentinel.Tag("example")
+	sentinel.Tag("description")
+	sentinel.Tag("format")
+	sentinel.Tag("minimum")
+	sentinel.Tag("maximum")
+	sentinel.Tag("exclusiveMinimum")
+	sentinel.Tag("exclusiveMaximum")
+	sentinel.Tag("multipleOf")
+	sentinel.Tag("minLength")
+	sentinel.Tag("maxLength")
+	sentinel.Tag("pattern")
+	sentinel.Tag("minItems")
+	sentinel.Tag("maxItems")
+	sentinel.Tag("uniqueItems")
+	sentinel.Tag("enum")
+	sentinel.Tag("nullable")
+	sentinel.Tag("readOnly")
+	sentinel.Tag("writeOnly")
+	sentinel.Tag("deprecated")
+}
+
+// parseFloat64 parses a string to *float64
+func parseFloat64(s string) *float64 {
+	if s == "" {
+		return nil
+	}
+	v, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		return nil
+	}
+	return &v
+}
+
+// parseInt parses a string to *int
+func parseInt(s string) *int {
+	if s == "" {
+		return nil
+	}
+	v, err := strconv.Atoi(s)
+	if err != nil {
+		return nil
+	}
+	return &v
+}
+
+// parseBool parses a string to *bool
+func parseBool(s string) *bool {
+	if s == "" {
+		return nil
+	}
+	v, err := strconv.ParseBool(s)
+	if err != nil {
+		return nil
+	}
+	return &v
+}
+
+// parseExample parses an example value based on the schema type
+func parseExample(value string, schemaType string) any {
+	if value == "" {
+		return nil
+	}
+
+	switch schemaType {
+	case "integer":
+		if v, err := strconv.Atoi(value); err == nil {
+			return v
+		}
+	case "number":
+		if v, err := strconv.ParseFloat(value, 64); err == nil {
+			return v
+		}
+	case "boolean":
+		if v, err := strconv.ParseBool(value); err == nil {
+			return v
+		}
+	case "array":
+		// For arrays, split by comma
+		parts := strings.Split(value, ",")
+		result := make([]any, len(parts))
+		for i, part := range parts {
+			result[i] = strings.TrimSpace(part)
+		}
+		return result
+	}
+
+	// Default to string
+	return value
+}
+
+// parseEnum parses comma-separated enum values based on schema type
+func parseEnum(value string, schemaType string) []any {
+	if value == "" {
+		return nil
+	}
+
+	parts := strings.Split(value, ",")
+	result := make([]any, 0, len(parts))
+
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+
+		switch schemaType {
+		case "integer":
+			if v, err := strconv.Atoi(part); err == nil {
+				result = append(result, v)
+			}
+		case "number":
+			if v, err := strconv.ParseFloat(part, 64); err == nil {
+				result = append(result, v)
+			}
+		case "boolean":
+			if v, err := strconv.ParseBool(part); err == nil {
+				result = append(result, v)
+			}
+		default:
+			result = append(result, part)
+		}
+	}
+
+	if len(result) == 0 {
+		return nil
+	}
+	return result
+}
+
+// applyOpenAPITags extracts OpenAPI tags from field metadata and applies them to the schema
+func applyOpenAPITags(schema *Schema, field sentinel.FieldMetadata) {
+	// Description
+	if desc := field.Tags["description"]; desc != "" {
+		schema.Description = desc
+	}
+
+	// Format
+	if format := field.Tags["format"]; format != "" {
+		schema.Format = format
+	}
+
+	// Example
+	if example := field.Tags["example"]; example != "" {
+		schema.Example = parseExample(example, schema.Type)
+	}
+
+	// Pattern
+	if pattern := field.Tags["pattern"]; pattern != "" {
+		schema.Pattern = pattern
+	}
+
+	// Enum
+	if enum := field.Tags["enum"]; enum != "" {
+		schema.Enum = parseEnum(enum, schema.Type)
+	}
+
+	// Numeric validations
+	schema.Minimum = parseFloat64(field.Tags["minimum"])
+	schema.Maximum = parseFloat64(field.Tags["maximum"])
+	schema.ExclusiveMinimum = parseBool(field.Tags["exclusiveMinimum"])
+	schema.ExclusiveMaximum = parseBool(field.Tags["exclusiveMaximum"])
+	schema.MultipleOf = parseFloat64(field.Tags["multipleOf"])
+
+	// String validations
+	schema.MinLength = parseInt(field.Tags["minLength"])
+	schema.MaxLength = parseInt(field.Tags["maxLength"])
+
+	// Array validations
+	schema.MinItems = parseInt(field.Tags["minItems"])
+	schema.MaxItems = parseInt(field.Tags["maxItems"])
+	schema.UniqueItems = parseBool(field.Tags["uniqueItems"])
+
+	// Boolean flags
+	schema.Nullable = parseBool(field.Tags["nullable"])
+	schema.ReadOnly = parseBool(field.Tags["readOnly"])
+	schema.WriteOnly = parseBool(field.Tags["writeOnly"])
+	schema.Deprecated = parseBool(field.Tags["deprecated"])
+}
 
 // metadataToSchema converts sentinel ModelMetadata to OpenAPI Schema
 func metadataToSchema(meta sentinel.ModelMetadata) *Schema {
@@ -26,6 +208,9 @@ func metadataToSchema(meta sentinel.ModelMetadata) *Schema {
 
 		// Convert field type to schema
 		fieldSchema := goTypeToSchema(field.Type)
+
+		// Apply OpenAPI tags to field schema
+		applyOpenAPITags(fieldSchema, field)
 
 		schema.Properties[propName] = fieldSchema
 
