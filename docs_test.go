@@ -445,7 +445,7 @@ func TestApplyOpenAPITags_Format(t *testing.T) {
 		Name: "Email",
 		Type: "string",
 		Tags: map[string]string{
-			"format": "email",
+			"validate": "email",
 		},
 	}
 
@@ -512,32 +512,21 @@ func TestApplyOpenAPITags_Example(t *testing.T) {
 }
 
 func TestApplyOpenAPITags_Pattern(t *testing.T) {
-	field := sentinel.FieldMetadata{
-		Name: "Username",
-		Type: "string",
-		Tags: map[string]string{
-			"pattern": "^[a-z0-9_]+$",
-		},
-	}
-
-	schema := &Schema{Type: "string"}
-	applyOpenAPITags(schema, field)
-
-	if schema.Pattern != "^[a-z0-9_]+$" {
-		t.Errorf("expected pattern '^[a-z0-9_]+$', got %q", schema.Pattern)
-	}
+	// Note: pattern validation is not supported via validate tags
+	// This test is kept for backward compatibility with custom tags if needed
+	t.Skip("Pattern validation is not extracted from validate tags")
 }
 
 func TestApplyOpenAPITags_Enum(t *testing.T) {
 	tests := []struct {
-		name       string
-		schemaType string
-		enumValue  string
-		wantLen    int
+		name        string
+		schemaType  string
+		validateTag string
+		wantLen     int
 	}{
-		{"string", "string", "red,green,blue", 3},
-		{"integer", "integer", "1,2,3", 3},
-		{"number", "number", "1.5,2.5,3.5", 3},
+		{"string", "string", "oneof=red green blue", 3},
+		{"integer", "integer", "oneof=1 2 3", 3},
+		{"number", "number", "oneof=1.5 2.5 3.5", 3},
 	}
 
 	for _, tt := range tests {
@@ -546,7 +535,7 @@ func TestApplyOpenAPITags_Enum(t *testing.T) {
 				Name: "Field",
 				Type: tt.schemaType,
 				Tags: map[string]string{
-					"enum": tt.enumValue,
+					"validate": tt.validateTag,
 				},
 			}
 
@@ -563,11 +552,9 @@ func TestApplyOpenAPITags_Enum(t *testing.T) {
 func TestApplyOpenAPITags_NumericValidations(t *testing.T) {
 	field := sentinel.FieldMetadata{
 		Name: "Age",
-		Type: "integer",
+		Type: "int",
 		Tags: map[string]string{
-			"minimum":    "0",
-			"maximum":    "120",
-			"multipleOf": "5",
+			"validate": "min=0,max=120",
 		},
 	}
 
@@ -580,9 +567,7 @@ func TestApplyOpenAPITags_NumericValidations(t *testing.T) {
 	if schema.Maximum == nil || *schema.Maximum != 120 {
 		t.Errorf("expected maximum 120, got %v", schema.Maximum)
 	}
-	if schema.MultipleOf == nil || *schema.MultipleOf != 5 {
-		t.Errorf("expected multipleOf 5, got %v", schema.MultipleOf)
-	}
+	// Note: multipleOf is not supported via validate tags
 }
 
 func TestApplyOpenAPITags_StringValidations(t *testing.T) {
@@ -590,8 +575,7 @@ func TestApplyOpenAPITags_StringValidations(t *testing.T) {
 		Name: "Username",
 		Type: "string",
 		Tags: map[string]string{
-			"minLength": "3",
-			"maxLength": "20",
+			"validate": "min=3,max=20",
 		},
 	}
 
@@ -611,20 +595,18 @@ func TestApplyOpenAPITags_ArrayValidations(t *testing.T) {
 		Name: "Tags",
 		Type: "[]string",
 		Tags: map[string]string{
-			"minItems":    "1",
-			"maxItems":    "10",
-			"uniqueItems": "true",
+			"validate": "len=5,unique",
 		},
 	}
 
 	schema := &Schema{Type: "array"}
 	applyOpenAPITags(schema, field)
 
-	if schema.MinItems == nil || *schema.MinItems != 1 {
-		t.Errorf("expected minItems 1, got %v", schema.MinItems)
+	if schema.MinItems == nil || *schema.MinItems != 5 {
+		t.Errorf("expected minItems 5, got %v", schema.MinItems)
 	}
-	if schema.MaxItems == nil || *schema.MaxItems != 10 {
-		t.Errorf("expected maxItems 10, got %v", schema.MaxItems)
+	if schema.MaxItems == nil || *schema.MaxItems != 5 {
+		t.Errorf("expected maxItems 5, got %v", schema.MaxItems)
 	}
 	if schema.UniqueItems == nil || *schema.UniqueItems != true {
 		t.Errorf("expected uniqueItems true, got %v", schema.UniqueItems)
@@ -632,28 +614,9 @@ func TestApplyOpenAPITags_ArrayValidations(t *testing.T) {
 }
 
 func TestApplyOpenAPITags_BooleanFlags(t *testing.T) {
-	field := sentinel.FieldMetadata{
-		Name: "ID",
-		Type: "string",
-		Tags: map[string]string{
-			"readOnly":   "true",
-			"nullable":   "false",
-			"deprecated": "true",
-		},
-	}
-
-	schema := &Schema{Type: "string"}
-	applyOpenAPITags(schema, field)
-
-	if schema.ReadOnly == nil || *schema.ReadOnly != true {
-		t.Errorf("expected readOnly true, got %v", schema.ReadOnly)
-	}
-	if schema.Nullable == nil || *schema.Nullable != false {
-		t.Errorf("expected nullable false, got %v", schema.Nullable)
-	}
-	if schema.Deprecated == nil || *schema.Deprecated != true {
-		t.Errorf("expected deprecated true, got %v", schema.Deprecated)
-	}
+	// Note: readOnly, nullable, deprecated are not supported via validate tags
+	// These would need custom sentinel tags if needed
+	t.Skip("Boolean flags are not extracted from validate tags")
 }
 
 func TestApplyOpenAPITags_MultipleTagsCombined(t *testing.T) {
@@ -662,11 +625,8 @@ func TestApplyOpenAPITags_MultipleTagsCombined(t *testing.T) {
 		Type: "string",
 		Tags: map[string]string{
 			"description": "User email address",
-			"format":      "email",
+			"validate":    "email,min=5,max=100",
 			"example":     "user@example.com",
-			"pattern":     "^[^@]+@[^@]+\\.[^@]+$",
-			"minLength":   "5",
-			"maxLength":   "100",
 		},
 	}
 
@@ -681,9 +641,6 @@ func TestApplyOpenAPITags_MultipleTagsCombined(t *testing.T) {
 	}
 	if schema.Example != "user@example.com" {
 		t.Errorf("expected example, got %v", schema.Example)
-	}
-	if schema.Pattern != "^[^@]+@[^@]+\\.[^@]+$" {
-		t.Errorf("expected pattern, got %q", schema.Pattern)
 	}
 	if schema.MinLength == nil || *schema.MinLength != 5 {
 		t.Errorf("expected minLength 5, got %v", schema.MinLength)

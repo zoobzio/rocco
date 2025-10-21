@@ -226,38 +226,55 @@ The spec includes:
 
 #### OpenAPI Schema Tags
 
-Enrich your OpenAPI documentation with struct tags. Rocco extracts these tags automatically via [sentinel](https://github.com/zoobzio/sentinel):
+Rocco automatically generates OpenAPI schemas from your types. Use the `validate` tag for runtime validation that also drives OpenAPI constraints, and documentation tags for additional metadata:
 
 ```go
 type CreateUserInput struct {
-    Name  string `json:"name" description:"User's full name" example:"John Doe" minLength:"2" maxLength:"50"`
-    Email string `json:"email" description:"User email address" format:"email" example:"user@example.com" pattern:"^[^@]+@[^@]+\.[^@]+$"`
-    Age   int    `json:"age" description:"User age in years" minimum:"18" maximum:"120" example:"25"`
-    Role  string `json:"role" description:"User role" enum:"admin,user,guest" example:"user"`
+    Name  string `json:"name" validate:"min=2,max=50" description:"User's full name" example:"John Doe"`
+    Email string `json:"email" validate:"email,min=5,max=100" description:"User email address" example:"user@example.com"`
+    Age   int    `json:"age" validate:"min=18,max=120" description:"User age in years" example:"25"`
+    Role  string `json:"role" validate:"oneof=admin user guest" description:"User role" example:"user"`
+    Tags  []string `json:"tags" validate:"len=5,unique" description:"User tags"`
 }
 ```
 
-**Supported tags:**
+**Validate Tag (Runtime Validation + OpenAPI):**
 
-| Tag | Type | Description | Example |
-|-----|------|-------------|---------|
-| `description` | string | Field description | `description:"User's full name"` |
-| `example` | any | Example value | `example:"John Doe"` |
-| `format` | string | Data format (e.g., email, uri, date-time) | `format:"email"` |
-| `pattern` | string | Regex pattern | `pattern:"^[a-z]+$"` |
-| `enum` | string | Comma-separated allowed values | `enum:"red,green,blue"` |
-| `minimum` | number | Minimum numeric value | `minimum:"0"` |
-| `maximum` | number | Maximum numeric value | `maximum:"100"` |
-| `multipleOf` | number | Number must be multiple of | `multipleOf:"5"` |
-| `minLength` | integer | Minimum string length | `minLength:"3"` |
-| `maxLength` | integer | Maximum string length | `maxLength:"50"` |
-| `minItems` | integer | Minimum array items | `minItems:"1"` |
-| `maxItems` | integer | Maximum array items | `maxItems:"10"` |
-| `uniqueItems` | boolean | Array items must be unique | `uniqueItems:"true"` |
-| `nullable` | boolean | Value can be null | `nullable:"true"` |
-| `readOnly` | boolean | Read-only field | `readOnly:"true"` |
-| `writeOnly` | boolean | Write-only field | `writeOnly:"true"` |
-| `deprecated` | boolean | Field is deprecated | `deprecated:"true"` |
+The `validate` tag uses [go-playground/validator](https://github.com/go-playground/validator) syntax and automatically generates corresponding OpenAPI constraints:
+
+| Validator | Applies To | OpenAPI Mapping | Example |
+|-----------|------------|-----------------|---------|
+| `min=N` | numbers | `minimum` | `validate:"min=0"` |
+| `max=N` | numbers | `maximum` | `validate:"max=100"` |
+| `min=N` | strings | `minLength` | `validate:"min=3"` |
+| `max=N` | strings | `maxLength` | `validate:"max=50"` |
+| `gte=N` | numbers | `minimum` | `validate:"gte=0"` |
+| `lte=N` | numbers | `maximum` | `validate:"lte=100"` |
+| `gt=N` | numbers | `minimum` + `exclusiveMinimum` | `validate:"gt=0"` |
+| `lt=N` | numbers | `maximum` + `exclusiveMaximum` | `validate:"lt=100"` |
+| `len=N` | arrays | `minItems` + `maxItems` | `validate:"len=5"` |
+| `len=N` | strings | `minLength` + `maxLength` | `validate:"len=10"` |
+| `unique` | arrays | `uniqueItems` | `validate:"unique"` |
+| `email` | strings | `format: "email"` | `validate:"email"` |
+| `url` | strings | `format: "uri"` | `validate:"url"` |
+| `uuid`, `uuid4`, `uuid5` | strings | `format: "uuid"` | `validate:"uuid4"` |
+| `datetime` | strings | `format: "date-time"` | `validate:"datetime"` |
+| `ipv4` | strings | `format: "ipv4"` | `validate:"ipv4"` |
+| `ipv6` | strings | `format: "ipv6"` | `validate:"ipv6"` |
+| `oneof=a b c` | any | `enum: ["a", "b", "c"]` | `validate:"oneof=red green blue"` |
+
+**Documentation Tags:**
+
+| Tag | Description | Example |
+|-----|-------------|---------|
+| `description` | Field description for OpenAPI | `description:"User's full name"` |
+| `example` | Example value (type-aware) | `example:"John Doe"` |
+
+**Benefits:**
+- **Single source of truth**: One tag for both validation and documentation
+- **Runtime enforcement**: Constraints are validated at runtime
+- **Automatic OpenAPI sync**: Documentation always matches validation rules
+- **Standard Go practices**: Uses the industry-standard validator library
 
 **Examples are type-aware:**
 - String fields: `example:"hello"` → `"hello"`
@@ -265,11 +282,6 @@ type CreateUserInput struct {
 - Number fields: `example:"3.14"` → `3.14`
 - Boolean fields: `example:"true"` → `true`
 - Array fields: `example:"a,b,c"` → `["a", "b", "c"]`
-
-**Enum values are type-aware:**
-- String: `enum:"red,green,blue"` → `["red", "green", "blue"]`
-- Integer: `enum:"1,2,3"` → `[1, 2, 3]`
-- Number: `enum:"1.5,2.5,3.5"` → `[1.5, 2.5, 3.5]`
 
 ### Observability
 

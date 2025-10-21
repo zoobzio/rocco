@@ -14,12 +14,12 @@ import (
 
 // Request/Response types
 type HelloRequest struct {
-	Name string `json:"name"`
+	Name string `json:"name" validate:"min=1,max=100" description:"Name to greet" example:"World"`
 }
 
 type HelloResponse struct {
-	Message string `json:"message"`
-	Time    string `json:"time"`
+	Message string `json:"message" description:"Greeting message" example:"Hello, World!"`
+	Time    string `json:"time" validate:"datetime" description:"Response timestamp" example:"2025-01-01T12:00:00Z"`
 }
 
 // Handler function
@@ -41,9 +41,9 @@ func handleHello(req *rocco.Request[HelloRequest]) (HelloResponse, error) {
 
 // Path param example
 type UserResponse struct {
-	UserID  string `json:"user_id"`
-	Message string `json:"message"`
-	Verbose bool   `json:"verbose,omitempty"`
+	UserID  string `json:"user_id" validate:"uuid4" description:"Unique user identifier" example:"550e8400-e29b-41d4-a716-446655440000"`
+	Message string `json:"message" description:"Status message"`
+	Verbose bool   `json:"verbose,omitempty" description:"Detailed response flag"`
 }
 
 func handleUser(req *rocco.Request[rocco.NoBody]) (UserResponse, error) {

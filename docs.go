@@ -9,26 +9,12 @@ import (
 )
 
 func init() {
-	// Register OpenAPI tags with sentinel for extraction
+	// Register tags with sentinel for extraction
+	// validate: runtime validation that also drives OpenAPI constraints
+	sentinel.Tag("validate")
+	// Documentation-only tags
 	sentinel.Tag("example")
 	sentinel.Tag("description")
-	sentinel.Tag("format")
-	sentinel.Tag("minimum")
-	sentinel.Tag("maximum")
-	sentinel.Tag("exclusiveMinimum")
-	sentinel.Tag("exclusiveMaximum")
-	sentinel.Tag("multipleOf")
-	sentinel.Tag("minLength")
-	sentinel.Tag("maxLength")
-	sentinel.Tag("pattern")
-	sentinel.Tag("minItems")
-	sentinel.Tag("maxItems")
-	sentinel.Tag("uniqueItems")
-	sentinel.Tag("enum")
-	sentinel.Tag("nullable")
-	sentinel.Tag("readOnly")
-	sentinel.Tag("writeOnly")
-	sentinel.Tag("deprecated")
 }
 
 // parseFloat64 parses a string to *float64
@@ -139,54 +125,214 @@ func parseEnum(value string, schemaType string) []any {
 	return result
 }
 
+// parseValidateTag parses go-playground/validator tag and extracts OpenAPI constraints
+func parseValidateTag(validateTag string, goType string) map[string]any {
+	if validateTag == "" {
+		return nil
+	}
+
+	constraints := make(map[string]any)
+	rules := strings.Split(validateTag, ",")
+
+	for _, rule := range rules {
+		rule = strings.TrimSpace(rule)
+		if rule == "" {
+			continue
+		}
+
+		// Split on = for parameterized rules
+		parts := strings.SplitN(rule, "=", 2)
+		tag := parts[0]
+		var param string
+		if len(parts) > 1 {
+			param = parts[1]
+		}
+
+		// Determine base type (without pointer/array prefix)
+		baseType := strings.TrimPrefix(goType, "*")
+		baseType = strings.TrimPrefix(baseType, "[]")
+		isArray := strings.HasPrefix(strings.TrimPrefix(goType, "*"), "[]")
+		isNumeric := baseType == "int" || baseType == "int8" || baseType == "int16" ||
+			baseType == "int32" || baseType == "int64" || baseType == "uint" ||
+			baseType == "uint8" || baseType == "uint16" || baseType == "uint32" ||
+			baseType == "uint64" || baseType == "float32" || baseType == "float64"
+		isString := baseType == "string"
+
+		switch tag {
+		// Numeric constraints
+		case "min":
+			if isNumeric {
+				constraints["minimum"] = parseFloat64(param)
+			} else if isString {
+				constraints["minLength"] = parseInt(param)
+			}
+			// Note: min/max on arrays applies to elements with dive, not array length
+		case "max":
+			if isNumeric {
+				constraints["maximum"] = parseFloat64(param)
+			} else if isString {
+				constraints["maxLength"] = parseInt(param)
+			}
+			// Note: min/max on arrays applies to elements with dive, not array length
+
+		// Array length constraints (validator uses len, min_items, max_items, or dive)
+		case "len":
+			if isArray {
+				// len=N means exactly N items
+				constraints["minItems"] = parseInt(param)
+				constraints["maxItems"] = parseInt(param)
+			} else if isString {
+				// len=N means exactly N characters
+				constraints["minLength"] = parseInt(param)
+				constraints["maxLength"] = parseInt(param)
+			}
+		case "gte":
+			if isNumeric {
+				constraints["minimum"] = parseFloat64(param)
+			}
+		case "lte":
+			if isNumeric {
+				constraints["maximum"] = parseFloat64(param)
+			}
+		case "gt":
+			if isNumeric {
+				constraints["minimum"] = parseFloat64(param)
+				constraints["exclusiveMinimum"] = parseBool("true")
+			}
+		case "lt":
+			if isNumeric {
+				constraints["maximum"] = parseFloat64(param)
+				constraints["exclusiveMaximum"] = parseBool("true")
+			}
+
+		// String format validations
+		case "email":
+			constraints["format"] = "email"
+		case "url":
+			constraints["format"] = "uri"
+		case "uuid", "uuid4", "uuid5":
+			constraints["format"] = "uuid"
+		case "datetime":
+			constraints["format"] = "date-time"
+		case "ipv4":
+			constraints["format"] = "ipv4"
+		case "ipv6":
+			constraints["format"] = "ipv6"
+
+		// Array validations
+		case "unique":
+			if isArray {
+				constraints["uniqueItems"] = parseBool("true")
+			}
+
+		// Enum (oneof)
+		case "oneof":
+			if param != "" {
+				// oneof uses space-separated values
+				values := strings.Split(param, " ")
+				enumValues := make([]any, 0, len(values))
+				for _, v := range values {
+					v = strings.TrimSpace(v)
+					if v == "" {
+						continue
+					}
+					// Parse based on type
+					if isNumeric {
+						if baseType == "float32" || baseType == "float64" {
+							if fv, err := strconv.ParseFloat(v, 64); err == nil {
+								enumValues = append(enumValues, fv)
+							}
+						} else {
+							if iv, err := strconv.Atoi(v); err == nil {
+								enumValues = append(enumValues, iv)
+							}
+						}
+					} else {
+						enumValues = append(enumValues, v)
+					}
+				}
+				if len(enumValues) > 0 {
+					constraints["enum"] = enumValues
+				}
+			}
+
+		// Required is handled via json tag omitempty, skip here
+		case "required":
+			// No-op: required is determined by json tag
+
+		// Pattern matching
+		case "contains", "startswith", "endswith":
+			// These could be mapped to pattern if we construct regex
+			// For now, skip as they're not direct OpenAPI mappings
+		}
+	}
+
+	return constraints
+}
+
 // applyOpenAPITags extracts OpenAPI tags from field metadata and applies them to the schema
 func applyOpenAPITags(schema *Schema, field sentinel.FieldMetadata) {
-	// Description
+	// First, parse validate tag to extract constraints
+	if validateTag := field.Tags["validate"]; validateTag != "" {
+		constraints := parseValidateTag(validateTag, field.Type)
+		for key, value := range constraints {
+			switch key {
+			case "minimum":
+				if v, ok := value.(*float64); ok {
+					schema.Minimum = v
+				}
+			case "maximum":
+				if v, ok := value.(*float64); ok {
+					schema.Maximum = v
+				}
+			case "exclusiveMinimum":
+				if v, ok := value.(*bool); ok {
+					schema.ExclusiveMinimum = v
+				}
+			case "exclusiveMaximum":
+				if v, ok := value.(*bool); ok {
+					schema.ExclusiveMaximum = v
+				}
+			case "minLength":
+				if v, ok := value.(*int); ok {
+					schema.MinLength = v
+				}
+			case "maxLength":
+				if v, ok := value.(*int); ok {
+					schema.MaxLength = v
+				}
+			case "minItems":
+				if v, ok := value.(*int); ok {
+					schema.MinItems = v
+				}
+			case "maxItems":
+				if v, ok := value.(*int); ok {
+					schema.MaxItems = v
+				}
+			case "uniqueItems":
+				if v, ok := value.(*bool); ok {
+					schema.UniqueItems = v
+				}
+			case "format":
+				if v, ok := value.(string); ok {
+					schema.Format = v
+				}
+			case "enum":
+				if v, ok := value.([]any); ok {
+					schema.Enum = v
+				}
+			}
+		}
+	}
+
+	// Then, apply documentation-only tags (can override validate-derived values)
 	if desc := field.Tags["description"]; desc != "" {
 		schema.Description = desc
 	}
 
-	// Format
-	if format := field.Tags["format"]; format != "" {
-		schema.Format = format
-	}
-
-	// Example
 	if example := field.Tags["example"]; example != "" {
 		schema.Example = parseExample(example, schema.Type)
 	}
-
-	// Pattern
-	if pattern := field.Tags["pattern"]; pattern != "" {
-		schema.Pattern = pattern
-	}
-
-	// Enum
-	if enum := field.Tags["enum"]; enum != "" {
-		schema.Enum = parseEnum(enum, schema.Type)
-	}
-
-	// Numeric validations
-	schema.Minimum = parseFloat64(field.Tags["minimum"])
-	schema.Maximum = parseFloat64(field.Tags["maximum"])
-	schema.ExclusiveMinimum = parseBool(field.Tags["exclusiveMinimum"])
-	schema.ExclusiveMaximum = parseBool(field.Tags["exclusiveMaximum"])
-	schema.MultipleOf = parseFloat64(field.Tags["multipleOf"])
-
-	// String validations
-	schema.MinLength = parseInt(field.Tags["minLength"])
-	schema.MaxLength = parseInt(field.Tags["maxLength"])
-
-	// Array validations
-	schema.MinItems = parseInt(field.Tags["minItems"])
-	schema.MaxItems = parseInt(field.Tags["maxItems"])
-	schema.UniqueItems = parseBool(field.Tags["uniqueItems"])
-
-	// Boolean flags
-	schema.Nullable = parseBool(field.Tags["nullable"])
-	schema.ReadOnly = parseBool(field.Tags["readOnly"])
-	schema.WriteOnly = parseBool(field.Tags["writeOnly"])
-	schema.Deprecated = parseBool(field.Tags["deprecated"])
 }
 
 // metadataToSchema converts sentinel ModelMetadata to OpenAPI Schema
