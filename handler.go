@@ -79,6 +79,9 @@ type Handler[In, Out any] struct {
 
 	// Validation.
 	validator *validator.Validate
+
+	// Middleware.
+	middleware []func(http.Handler) http.Handler
 }
 
 // Process implements RouteHandler.
@@ -328,6 +331,7 @@ func NewHandler[In, Out any](name string, method, path string, fn func(*Request[
 		tracer:          tracez.New(),
 		logger:          nil,
 		validator:       validator.New(),
+		middleware:      make([]func(http.Handler) http.Handler, 0),
 	}
 }
 
@@ -401,6 +405,17 @@ func (h *Handler[In, Out]) WithErrorCodes(codes ...int) *Handler[In, Out] {
 func (h *Handler[In, Out]) WithMaxBodySize(size int64) *Handler[In, Out] {
 	h.maxBodySize = size
 	return h
+}
+
+// Use adds middleware to this handler.
+func (h *Handler[In, Out]) Use(middleware ...func(http.Handler) http.Handler) *Handler[In, Out] {
+	h.middleware = append(h.middleware, middleware...)
+	return h
+}
+
+// Middleware returns the handler's middleware stack.
+func (h *Handler[In, Out]) Middleware() []func(http.Handler) http.Handler {
+	return h.middleware
 }
 
 // extractParams extracts and validates required parameters from the request.

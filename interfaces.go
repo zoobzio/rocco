@@ -20,6 +20,9 @@ type RouteHandler interface {
 	Method() string
 	Path() string
 
+	// Middleware
+	Middleware() []func(http.Handler) http.Handler
+
 	// Optional metadata for documentation
 	Summary() string
 	Description() string

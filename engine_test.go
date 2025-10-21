@@ -416,3 +416,156 @@ func TestEngine_Shutdown(t *testing.T) {
 		t.Error("server did not shut down in time")
 	}
 }
+
+func TestEngine_Register_HandlerMiddleware(t *testing.T) {
+	engine := NewEngine(nil)
+
+	var middlewareCalled bool
+	middleware := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			middlewareCalled = true
+			w.Header().Set("X-Middleware", "called")
+			next.ServeHTTP(w, r)
+		})
+	}
+
+	handler := NewHandler[NoBody, testOutput](
+		"test",
+		"GET",
+		"/test",
+		func(_ *Request[NoBody]) (testOutput, error) {
+			return testOutput{Message: "OK"}, nil
+		},
+	).Use(middleware)
+
+	engine.Register(handler)
+
+	// Test that handler middleware is applied
+	req := httptest.NewRequest("GET", "/test", nil)
+	w := httptest.NewRecorder()
+	engine.chiRouter.ServeHTTP(w, req)
+
+	if !middlewareCalled {
+		t.Error("handler middleware was not called")
+	}
+	if w.Header().Get("X-Middleware") != "called" {
+		t.Error("middleware header not set")
+	}
+	if w.Code != 200 {
+		t.Errorf("expected status 200, got %d", w.Code)
+	}
+}
+
+func TestEngine_Register_HandlerMiddlewareOrder(t *testing.T) {
+	engine := NewEngine(nil)
+
+	var callOrder []string
+
+	mw1 := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			callOrder = append(callOrder, "mw1")
+			next.ServeHTTP(w, r)
+		})
+	}
+
+	mw2 := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			callOrder = append(callOrder, "mw2")
+			next.ServeHTTP(w, r)
+		})
+	}
+
+	handler := NewHandler[NoBody, testOutput](
+		"test",
+		"GET",
+		"/test",
+		func(_ *Request[NoBody]) (testOutput, error) {
+			callOrder = append(callOrder, "handler")
+			return testOutput{Message: "OK"}, nil
+		},
+	).Use(mw1, mw2)
+
+	engine.Register(handler)
+
+	req := httptest.NewRequest("GET", "/test", nil)
+	w := httptest.NewRecorder()
+	engine.chiRouter.ServeHTTP(w, req)
+
+	if len(callOrder) != 3 {
+		t.Fatalf("expected 3 calls, got %d", len(callOrder))
+	}
+	if callOrder[0] != "mw1" || callOrder[1] != "mw2" || callOrder[2] != "handler" {
+		t.Errorf("expected order [mw1, mw2, handler], got %v", callOrder)
+	}
+}
+
+func TestEngine_Register_HandlerAndEngineMiddleware(t *testing.T) {
+	engine := NewEngine(nil)
+
+	var callOrder []string
+
+	// Engine-level middleware
+	engineMw := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			callOrder = append(callOrder, "engine")
+			next.ServeHTTP(w, r)
+		})
+	}
+	engine.Use(engineMw)
+
+	// Handler-level middleware
+	handlerMw := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			callOrder = append(callOrder, "handler-mw")
+			next.ServeHTTP(w, r)
+		})
+	}
+
+	handler := NewHandler[NoBody, testOutput](
+		"test",
+		"GET",
+		"/test",
+		func(_ *Request[NoBody]) (testOutput, error) {
+			callOrder = append(callOrder, "handler")
+			return testOutput{Message: "OK"}, nil
+		},
+	).Use(handlerMw)
+
+	engine.Register(handler)
+
+	req := httptest.NewRequest("GET", "/test", nil)
+	w := httptest.NewRecorder()
+	engine.chiRouter.ServeHTTP(w, req)
+
+	if len(callOrder) != 3 {
+		t.Fatalf("expected 3 calls, got %d", len(callOrder))
+	}
+	// Engine middleware runs first, then handler middleware, then handler
+	if callOrder[0] != "engine" || callOrder[1] != "handler-mw" || callOrder[2] != "handler" {
+		t.Errorf("expected order [engine, handler-mw, handler], got %v", callOrder)
+	}
+}
+
+func TestEngine_Register_NoHandlerMiddleware(t *testing.T) {
+	engine := NewEngine(nil)
+
+	handler := NewHandler[NoBody, testOutput](
+		"test",
+		"GET",
+		"/test",
+		func(_ *Request[NoBody]) (testOutput, error) {
+			return testOutput{Message: "OK"}, nil
+		},
+	)
+
+	// Should not panic with no middleware
+	engine.Register(handler)
+
+	req := httptest.NewRequest("GET", "/test", nil)
+	w := httptest.NewRecorder()
+	engine.chiRouter.ServeHTTP(w, req)
+
+	if w.Code != 200 {
+		t.Errorf("expected status 200, got %d", w.Code)
+	}
+}

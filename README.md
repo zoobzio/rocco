@@ -183,7 +183,7 @@ Available sentinel errors:
 
 ### Middleware
 
-Rocco uses Chi middleware - add any Chi-compatible middleware:
+Rocco uses Chi middleware - add any Chi-compatible middleware at the engine or handler level:
 
 ```go
 import (
@@ -192,14 +192,28 @@ import (
 
 engine := rocco.NewEngine(rocco.DefaultConfig())
 
-// Add middleware before registering handlers
+// Engine-level middleware (applies to all handlers)
 engine.Use(middleware.Logger)
 engine.Use(middleware.Recoverer)
 engine.Use(middleware.RequestID)
 
+// Handler-level middleware (applies to specific handler only)
+handler := rocco.NewHandler[CreateUserInput, UserOutput](
+    "create-user",
+    "POST",
+    "/users",
+    func(req *rocco.Request[CreateUserInput]) (UserOutput, error) {
+        return UserOutput{...}, nil
+    },
+).
+    Use(middleware.AllowContentType("application/json")).
+    Use(customAuthMiddleware)
+
 // Register handlers
 engine.Register(handler)
 ```
+
+Middleware execution order: engine middleware runs first, then handler middleware, then the handler function.
 
 ### OpenAPI Generation
 

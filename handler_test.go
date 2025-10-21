@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"net/http/httptest"
 	"testing"
 
@@ -461,5 +462,52 @@ func TestHandler_ValidationOutput(t *testing.T) {
 	}
 	if w.Code != 500 {
 		t.Errorf("expected status 500 for output validation, got %d", w.Code)
+	}
+}
+
+func TestHandler_Use(t *testing.T) {
+	middleware := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			next.ServeHTTP(w, r)
+		})
+	}
+
+	handler := NewHandler[NoBody, testOutput](
+		"test",
+		"GET",
+		"/test",
+		func(_ *Request[NoBody]) (testOutput, error) {
+			return testOutput{Message: "OK"}, nil
+		},
+	).Use(middleware)
+
+	if len(handler.Middleware()) != 1 {
+		t.Errorf("expected 1 middleware, got %d", len(handler.Middleware()))
+	}
+}
+
+func TestHandler_UseMultiple(t *testing.T) {
+	mw1 := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			next.ServeHTTP(w, r)
+		})
+	}
+	mw2 := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			next.ServeHTTP(w, r)
+		})
+	}
+
+	handler := NewHandler[NoBody, testOutput](
+		"test",
+		"GET",
+		"/test",
+		func(_ *Request[NoBody]) (testOutput, error) {
+			return testOutput{}, nil
+		},
+	).Use(mw1, mw2)
+
+	if len(handler.Middleware()) != 2 {
+		t.Errorf("expected 2 middleware, got %d", len(handler.Middleware()))
 	}
 }

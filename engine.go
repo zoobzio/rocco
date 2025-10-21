@@ -138,8 +138,14 @@ func (e *Engine) Register(handlers ...RouteHandler) {
 		// Adapt our handler to http.HandlerFunc.
 		httpHandler := e.adaptHandler(handler)
 
-		// Register with Chi.
-		e.chiRouter.Method(handler.Method(), handler.Path(), httpHandler)
+		// Apply handler-specific middleware if available.
+		middleware := handler.Middleware()
+		if len(middleware) > 0 {
+			e.chiRouter.With(middleware...).Method(handler.Method(), handler.Path(), httpHandler)
+		} else {
+			// Register with Chi (no handler middleware).
+			e.chiRouter.Method(handler.Method(), handler.Path(), httpHandler)
+		}
 	}
 }
 
