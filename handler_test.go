@@ -511,3 +511,85 @@ func TestHandler_UseMultiple(t *testing.T) {
 		t.Errorf("expected 2 middleware, got %d", len(handler.Middleware()))
 	}
 }
+
+func TestHandler_Close(t *testing.T) {
+	handler := NewHandler[NoBody, testOutput](
+		"test",
+		"GET",
+		"/test",
+		func(_ *Request[NoBody]) (testOutput, error) {
+			return testOutput{}, nil
+		},
+	)
+
+	err := handler.Close()
+	if err != nil {
+		t.Errorf("expected nil error, got %v", err)
+	}
+}
+
+func TestHandler_Metrics(t *testing.T) {
+	handler := NewHandler[NoBody, testOutput](
+		"test",
+		"GET",
+		"/test",
+		func(_ *Request[NoBody]) (testOutput, error) {
+			return testOutput{}, nil
+		},
+	)
+
+	metrics := handler.Metrics()
+	if metrics == nil {
+		t.Error("expected non-nil metrics")
+	}
+}
+
+func TestHandler_Tracer(t *testing.T) {
+	handler := NewHandler[NoBody, testOutput](
+		"test",
+		"GET",
+		"/test",
+		func(_ *Request[NoBody]) (testOutput, error) {
+			return testOutput{}, nil
+		},
+	)
+
+	tracer := handler.Tracer()
+	if tracer == nil {
+		t.Error("expected non-nil tracer")
+	}
+}
+
+func TestHandler_OutputSchema(t *testing.T) {
+	handler := NewHandler[NoBody, testOutput](
+		"test",
+		"GET",
+		"/test",
+		func(_ *Request[NoBody]) (testOutput, error) {
+			return testOutput{}, nil
+		},
+	)
+
+	schema := handler.OutputSchema()
+	if schema == nil {
+		t.Fatal("expected non-nil schema")
+	}
+	if schema.Type != "object" {
+		t.Errorf("expected type 'object', got %q", schema.Type)
+	}
+}
+
+func TestHandler_WithMaxBodySize(t *testing.T) {
+	handler := NewHandler[testInput, testOutput](
+		"test",
+		"POST",
+		"/test",
+		func(_ *Request[testInput]) (testOutput, error) {
+			return testOutput{}, nil
+		},
+	).WithMaxBodySize(1024)
+
+	if handler.maxBodySize != 1024 {
+		t.Errorf("expected maxBodySize 1024, got %d", handler.maxBodySize)
+	}
+}

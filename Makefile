@@ -45,7 +45,7 @@ lint-fix:
 # Generate coverage report
 coverage:
 	@echo "Generating coverage report..."
-	@go test -coverprofile=coverage.out ./...
+	@go test -coverprofile=coverage.out $(shell go list ./... | grep -v /cmd/)
 	@go tool cover -html=coverage.out -o coverage.html
 	@go tool cover -func=coverage.out | tail -1
 	@echo "Coverage report generated: coverage.html"
