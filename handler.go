@@ -8,7 +8,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"os"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-playground/validator/v10"
@@ -75,7 +74,6 @@ type Handler[In, Out any] struct {
 	// Observability.
 	metrics *metricz.Registry
 	tracer  *tracez.Tracer
-	logger  *slog.Logger
 
 	// Validation.
 	validator *validator.Validate
@@ -101,7 +99,7 @@ func (h *Handler[In, Out]) Process(ctx context.Context, r *http.Request, w http.
 		h.metrics.Counter(MetricRequestsParseErrors).Inc()
 		span.SetTag(TraceError, "true")
 		span.SetTag(TraceErrorType, "params")
-		h.getLogger().Error("failed to extract params", "error", err, "handler", h.name)
+		slog.Error("failed to extract params", "error", err, "handler", h.name)
 		writeErrorResponse(w, http.StatusUnprocessableEntity)
 		return err
 	}
@@ -120,7 +118,7 @@ func (h *Handler[In, Out]) Process(ctx context.Context, r *http.Request, w http.
 			h.metrics.Counter(MetricRequestsParseErrors).Inc()
 			span.SetTag(TraceError, "true")
 			span.SetTag(TraceErrorType, "read_body")
-			h.getLogger().Error("failed to read request body", "error", readErr, "handler", h.name)
+			slog.Error("failed to read request body", "error", readErr, "handler", h.name)
 			writeErrorResponse(w, http.StatusBadRequest)
 			return readErr
 		}
@@ -131,7 +129,7 @@ func (h *Handler[In, Out]) Process(ctx context.Context, r *http.Request, w http.
 				h.metrics.Counter(MetricRequestsParseErrors).Inc()
 				span.SetTag(TraceError, "true")
 				span.SetTag(TraceErrorType, "parse_body")
-				h.getLogger().Error("failed to parse request body", "error", unmarshalErr, "handler", h.name)
+				slog.Error("failed to parse request body", "error", unmarshalErr, "handler", h.name)
 				writeErrorResponse(w, http.StatusUnprocessableEntity)
 				return unmarshalErr
 			}
@@ -141,7 +139,7 @@ func (h *Handler[In, Out]) Process(ctx context.Context, r *http.Request, w http.
 				h.metrics.Counter(MetricRequestsValidationErrors).Inc()
 				span.SetTag(TraceError, "true")
 				span.SetTag(TraceErrorType, "validation")
-				h.getLogger().Warn("request validation failed", "error", inputErr, "handler", h.name)
+				slog.Warn("request validation failed", "error", inputErr, "handler", h.name)
 				writeValidationErrorResponse(w, inputErr)
 				return inputErr
 			}
@@ -169,14 +167,14 @@ func (h *Handler[In, Out]) Process(ctx context.Context, r *http.Request, w http.
 				h.metrics.Counter(MetricRequestsHandlerErrors).Inc()
 				span.SetTag(TraceError, "true")
 				span.SetTag(TraceErrorType, "undeclared_sentinel")
-				h.getLogger().Error("undeclared sentinel error", "error", err, "status", status, "handler", h.name)
+				slog.Error("undeclared sentinel error", "error", err, "status", status, "handler", h.name)
 				writeErrorResponse(w, http.StatusInternalServerError)
 				return fmt.Errorf("undeclared sentinel error %w (add %d to WithErrorCodes)", err, status)
 			}
 
 			// Declared sentinel error - successful handling.
 			h.metrics.Counter(MetricRequestsSuccess).Inc()
-			h.getLogger().Debug("sentinel error returned", "error", err, "status", status, "handler", h.name)
+			slog.Debug("sentinel error returned", "error", err, "status", status, "handler", h.name)
 			writeErrorResponse(w, status)
 			return nil
 		}
@@ -185,7 +183,7 @@ func (h *Handler[In, Out]) Process(ctx context.Context, r *http.Request, w http.
 		h.metrics.Counter(MetricRequestsHandlerErrors).Inc()
 		span.SetTag(TraceError, "true")
 		span.SetTag(TraceErrorType, "handler")
-		h.getLogger().Error("handler error", "error", err, "handler", h.name)
+		slog.Error("handler error", "error", err, "handler", h.name)
 		writeErrorResponse(w, http.StatusInternalServerError)
 		return err
 	}
@@ -195,7 +193,7 @@ func (h *Handler[In, Out]) Process(ctx context.Context, r *http.Request, w http.
 		h.metrics.Counter(MetricRequestsValidationErrors).Inc()
 		span.SetTag(TraceError, "true")
 		span.SetTag(TraceErrorType, "output_validation")
-		h.getLogger().Error("output validation failed", "error", validErr, "handler", h.name)
+		slog.Error("output validation failed", "error", validErr, "handler", h.name)
 		writeErrorResponse(w, http.StatusInternalServerError)
 		return fmt.Errorf("output validation failed: %w", validErr)
 	}
@@ -206,7 +204,7 @@ func (h *Handler[In, Out]) Process(ctx context.Context, r *http.Request, w http.
 		h.metrics.Counter(MetricRequestsMarshalErrors).Inc()
 		span.SetTag(TraceError, "true")
 		span.SetTag(TraceErrorType, "marshal")
-		h.getLogger().Error("failed to marshal response", "error", err, "handler", h.name)
+		slog.Error("failed to marshal response", "error", err, "handler", h.name)
 		writeErrorResponse(w, http.StatusInternalServerError)
 		return err
 	}
@@ -329,25 +327,9 @@ func NewHandler[In, Out any](name string, method, path string, fn func(*Request[
 		OutputMeta:      sentinel.Scan[Out](),
 		metrics:         metricz.New(),
 		tracer:          tracez.New(),
-		logger:          nil,
 		validator:       validator.New(),
 		middleware:      make([]func(http.Handler) http.Handler, 0),
 	}
-}
-
-// WithLogger sets the logger for the handler.
-// If not set, a default logger writing to stdout will be created on first use.
-func (h *Handler[In, Out]) WithLogger(logger *slog.Logger) *Handler[In, Out] {
-	h.logger = logger
-	return h
-}
-
-// getLogger returns the handler's logger, creating a default one if not set.
-func (h *Handler[In, Out]) getLogger() *slog.Logger {
-	if h.logger == nil {
-		h.logger = slog.New(slog.NewTextHandler(os.Stdout, nil))
-	}
-	return h.logger
 }
 
 // WithSummary sets the OpenAPI summary.
