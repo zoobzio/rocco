@@ -18,8 +18,8 @@ github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZb
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
 github.com/stretchr/testify v1.8.4 h1:CcVxjf3Q8PM0mHUKJCdn+eZZtm5yQwehR5yeSVQQcUk=
 github.com/stretchr/testify v1.8.4/go.mod h1:sz/lmYIOXD/1dqDmKjjqLyZ2RngseejIcXlSw2iwfAo=
-github.com/zoobzio/capitan v0.0.2 h1:MIZos+gaqv9+EuqD6yeVmavkv9JRm27isy2GYI5E11k=
-github.com/zoobzio/capitan v0.0.2/go.mod h1:dsyQQCbV0QCH6Gubli8PKIHstyVFvKAJE1QyJA10jXk=
+github.com/zoobzio/capitan v0.0.3 h1:tkgmUcFUfXma5D7txnY9Vjt/HjKD9iN3oLGlWvJjF5s=
+github.com/zoobzio/capitan v0.0.3/go.mod h1:/OwNDIB1CHxwSzsF4e48B2+2e/IMIvTb0ZMgVeNyYig=
 github.com/zoobzio/sentinel v0.0.5 h1:EQV7vDmoB4sDxbyAZwnqYE48AOPIdkKZGIuGOMGjBdI=
 github.com/zoobzio/sentinel v0.0.5/go.mod h1:7jMCOCUmZs5gWM7slkzwNxPQE7kCyboSHyGjYQV8wNo=
 golang.org/x/crypto v0.42.0 h1:chiH31gIWm57EkTXpwnqf8qeuMUi0yekh6mT2AvFlqI=
