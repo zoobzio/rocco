@@ -3,9 +3,6 @@ package rocco
 import (
 	"context"
 	"net/http"
-
-	"github.com/zoobzio/metricz"
-	"github.com/zoobzio/tracez"
 )
 
 // RouteHandler represents an HTTP route handler with metadata.
@@ -37,10 +34,6 @@ type RouteHandler interface {
 	OutputSchema() *Schema  // Returns OpenAPI schema for response body
 	InputTypeName() string  // Returns the Go type name for request body
 	OutputTypeName() string // Returns the Go type name for response body
-
-	// Observability
-	Metrics() *metricz.Registry
-	Tracer() *tracez.Tracer
 
 	// Lifecycle
 	Close() error

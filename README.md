@@ -17,7 +17,6 @@ Type-safe HTTP framework for Go with automatic OpenAPI generation.
 - **Automatic OpenAPI**: Generate OpenAPI 3.0.3 specs from your code
 - **Request Validation**: Built-in validation using struct tags
 - **Sentinel Errors**: HTTP error handling with sentinel error pattern
-- **Observability**: Built-in metrics, tracing, and hooks
 - **Chi Integration**: Powered by the battle-tested Chi router
 - **Zero Magic**: Explicit configuration, no hidden behaviors
 
@@ -299,32 +298,63 @@ The `validate` tag uses [go-playground/validator](https://github.com/go-playgrou
 
 ### Observability
 
-Built-in metrics, tracing, and hooks:
+Rocco emits lifecycle events via [capitan](https://github.com/zoobzio/capitan), a type-safe event coordination library. Users control observability by hooking events and wiring them to their preferred backends (OpenTelemetry, Prometheus, logging, etc.).
 
+**Hook events for logging:**
 ```go
-// Access metrics
-engine.Metrics().Counter("custom.metric").Inc()
+import "github.com/zoobzio/capitan"
 
-// Access tracer
-ctx, span := engine.Tracer().StartSpan(ctx, "operation")
-defer span.Finish()
-
-// Register hooks
-engine.OnRequestReceived(func(ctx context.Context, event *rocco.Event) error {
-    fmt.Println("Request received:", event.Type)
-    return nil
-})
-
-engine.OnRequestCompleted(func(ctx context.Context, event *rocco.Event) error {
-    fmt.Println("Request completed")
-    return nil
-})
-
-engine.OnRequestRejected(func(ctx context.Context, event *rocco.Event) error {
-    fmt.Println("Request rejected:", event.Data["error"])
-    return nil
+capitan.Hook(rocco.EventRequestReceived, func(ctx context.Context, e *capitan.Event) {
+    method, _ := rocco.KeyMethod.From(e)
+    path, _ := rocco.KeyPath.From(e)
+    log.Printf("Request: %s %s", method, path)
 })
 ```
+
+**Observe all events (metrics, tracing, etc.):**
+```go
+capitan.Observe(func(ctx context.Context, e *capitan.Event) {
+    // Wire to your observability backend
+    // (OpenTelemetry, Prometheus, DataDog, etc.)
+})
+```
+
+**Available Events:**
+
+| Signal | Description | Fields |
+|--------|-------------|--------|
+| `EventEngineCreated` | Engine instance created | `host`, `port` |
+| `EventEngineStarting` | Server starting to listen | `host`, `port`, `address` |
+| `EventEngineShutdownStarted` | Shutdown initiated | - |
+| `EventEngineShutdownComplete` | Shutdown finished | `graceful`, `error` (if failed) |
+| `EventHandlerRegistered` | Handler registered with engine | `handler_name`, `method`, `path` |
+| `EventRequestReceived` | Request received | `method`, `path`, `handler_name` |
+| `EventRequestCompleted` | Request succeeded | `method`, `path`, `handler_name` |
+| `EventRequestFailed` | Request failed | `method`, `path`, `handler_name`, `error` |
+| `EventHandlerExecuting` | Handler function starting | `handler_name` |
+| `EventHandlerSuccess` | Handler returned successfully | `handler_name`, `status_code` |
+| `EventHandlerError` | Handler returned error | `handler_name`, `error` |
+| `EventHandlerSentinelError` | Declared sentinel error returned | `handler_name`, `error`, `status_code` |
+| `EventHandlerUndeclaredSentinel` | Undeclared sentinel error (bug) | `handler_name`, `error`, `status_code` |
+| `EventRequestParamsInvalid` | Path/query param extraction failed | `handler_name`, `error` |
+| `EventRequestBodyReadError` | Failed to read request body | `handler_name`, `error` |
+| `EventRequestBodyParseError` | Failed to parse JSON body | `handler_name`, `error` |
+| `EventRequestValidationInputFailed` | Input validation failed | `handler_name`, `error` |
+| `EventRequestValidationOutputFailed` | Output validation failed | `handler_name`, `error` |
+| `EventRequestResponseMarshalError` | Failed to marshal response | `handler_name`, `error` |
+
+**Field Keys:**
+- `KeyHost` (string) - Server host
+- `KeyPort` (int) - Server port
+- `KeyAddress` (string) - Server address (host:port)
+- `KeyMethod` (string) - HTTP method
+- `KeyPath` (string) - Request path
+- `KeyHandlerName` (string) - Handler identifier
+- `KeyStatusCode` (int) - HTTP status code
+- `KeyError` (string) - Error message
+- `KeyGraceful` (bool) - Graceful shutdown success
+
+All events and keys are exported constants in the `rocco` package for type-safe access.
 
 ### Configuration
 
@@ -387,9 +417,7 @@ Rocco is built on:
 - [chi](https://github.com/go-chi/chi) - HTTP router
 - [sentinel](https://github.com/zoobzio/sentinel) - Type metadata extraction
 - [validator](https://github.com/go-playground/validator) - Struct validation
-- [metricz](https://github.com/zoobzio/metricz) - Metrics collection
-- [tracez](https://github.com/zoobzio/tracez) - Distributed tracing
-- [hookz](https://github.com/zoobzio/hookz) - Event hooks
+- [capitan](https://github.com/zoobzio/capitan) - Event coordination
 
 ## Contributing
 

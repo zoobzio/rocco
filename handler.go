@@ -6,36 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-playground/validator/v10"
-	"github.com/zoobzio/metricz"
+	"github.com/zoobzio/capitan"
 	"github.com/zoobzio/sentinel"
-	"github.com/zoobzio/tracez"
-)
-
-// Metric keys.
-const (
-	MetricRequestsTotal            metricz.Key = "handler.requests.total"
-	MetricRequestsSuccess          metricz.Key = "handler.requests.success"
-	MetricRequestsParseErrors      metricz.Key = "handler.requests.parse_errors"
-	MetricRequestsValidationErrors metricz.Key = "handler.requests.validation_errors"
-	MetricRequestsHandlerErrors    metricz.Key = "handler.requests.handler_errors"
-	MetricRequestsMarshalErrors    metricz.Key = "handler.requests.marshal_errors"
-	MetricHandlerDuration          metricz.Key = "handler.duration_ms"
-)
-
-// Trace spans.
-const (
-	TraceHandlerProcess tracez.Key = "handler.process"
-)
-
-// Trace tags.
-const (
-	TraceError     tracez.Tag = "error"
-	TraceErrorType tracez.Tag = "error.type"
 )
 
 // Handler wraps a typed handler function with metadata for documentation and parsing.
@@ -71,10 +47,6 @@ type Handler[In, Out any] struct {
 	InputMeta  sentinel.ModelMetadata
 	OutputMeta sentinel.ModelMetadata
 
-	// Observability.
-	metrics *metricz.Registry
-	tracer  *tracez.Tracer
-
 	// Validation.
 	validator *validator.Validate
 
@@ -84,22 +56,18 @@ type Handler[In, Out any] struct {
 
 // Process implements RouteHandler.
 func (h *Handler[In, Out]) Process(ctx context.Context, r *http.Request, w http.ResponseWriter) error {
-	// Start trace span.
-	ctx, span := h.tracer.StartSpan(ctx, TraceHandlerProcess)
-	defer span.Finish()
-
-	// Track metrics.
-	h.metrics.Counter(MetricRequestsTotal).Inc()
-	timer := h.metrics.Timer(MetricHandlerDuration).Start()
-	defer timer.Stop()
+	// Emit handler executing event
+	capitan.Emit(ctx, EventHandlerExecuting,
+		KeyHandlerName.Field(h.name),
+	)
 
 	// Extract and validate parameters.
 	params, err := h.extractParams(ctx, r)
 	if err != nil {
-		h.metrics.Counter(MetricRequestsParseErrors).Inc()
-		span.SetTag(TraceError, "true")
-		span.SetTag(TraceErrorType, "params")
-		slog.Error("failed to extract params", "error", err, "handler", h.name)
+		capitan.Emit(ctx, EventRequestParamsInvalid,
+			KeyHandlerName.Field(h.name),
+			KeyError.Field(err.Error()),
+		)
 		writeErrorResponse(w, http.StatusUnprocessableEntity)
 		return err
 	}
@@ -115,10 +83,10 @@ func (h *Handler[In, Out]) Process(ctx context.Context, r *http.Request, w http.
 
 		body, readErr := io.ReadAll(bodyReader)
 		if readErr != nil {
-			h.metrics.Counter(MetricRequestsParseErrors).Inc()
-			span.SetTag(TraceError, "true")
-			span.SetTag(TraceErrorType, "read_body")
-			slog.Error("failed to read request body", "error", readErr, "handler", h.name)
+			capitan.Emit(ctx, EventRequestBodyReadError,
+				KeyHandlerName.Field(h.name),
+				KeyError.Field(readErr.Error()),
+			)
 			writeErrorResponse(w, http.StatusBadRequest)
 			return readErr
 		}
@@ -126,20 +94,20 @@ func (h *Handler[In, Out]) Process(ctx context.Context, r *http.Request, w http.
 
 		if len(body) > 0 {
 			if unmarshalErr := json.Unmarshal(body, &input); unmarshalErr != nil {
-				h.metrics.Counter(MetricRequestsParseErrors).Inc()
-				span.SetTag(TraceError, "true")
-				span.SetTag(TraceErrorType, "parse_body")
-				slog.Error("failed to parse request body", "error", unmarshalErr, "handler", h.name)
+				capitan.Emit(ctx, EventRequestBodyParseError,
+					KeyHandlerName.Field(h.name),
+					KeyError.Field(unmarshalErr.Error()),
+				)
 				writeErrorResponse(w, http.StatusUnprocessableEntity)
 				return unmarshalErr
 			}
 
 			// Validate input.
 			if inputErr := h.validator.Struct(input); inputErr != nil {
-				h.metrics.Counter(MetricRequestsValidationErrors).Inc()
-				span.SetTag(TraceError, "true")
-				span.SetTag(TraceErrorType, "validation")
-				slog.Warn("request validation failed", "error", inputErr, "handler", h.name)
+				capitan.Emit(ctx, EventRequestValidationInputFailed,
+					KeyHandlerName.Field(h.name),
+					KeyError.Field(inputErr.Error()),
+				)
 				writeValidationErrorResponse(w, inputErr)
 				return inputErr
 			}
@@ -164,36 +132,40 @@ func (h *Handler[In, Out]) Process(ctx context.Context, r *http.Request, w http.
 			// Validate that this error code is declared.
 			if !h.isErrorCodeDeclared(status) {
 				// Undeclared sentinel error - programming error.
-				h.metrics.Counter(MetricRequestsHandlerErrors).Inc()
-				span.SetTag(TraceError, "true")
-				span.SetTag(TraceErrorType, "undeclared_sentinel")
-				slog.Error("undeclared sentinel error", "error", err, "status", status, "handler", h.name)
+				capitan.Emit(ctx, EventHandlerUndeclaredSentinel,
+					KeyHandlerName.Field(h.name),
+					KeyError.Field(err.Error()),
+					KeyStatusCode.Field(status),
+				)
 				writeErrorResponse(w, http.StatusInternalServerError)
 				return fmt.Errorf("undeclared sentinel error %w (add %d to WithErrorCodes)", err, status)
 			}
 
 			// Declared sentinel error - successful handling.
-			h.metrics.Counter(MetricRequestsSuccess).Inc()
-			slog.Debug("sentinel error returned", "error", err, "status", status, "handler", h.name)
+			capitan.Emit(ctx, EventHandlerSentinelError,
+				KeyHandlerName.Field(h.name),
+				KeyError.Field(err.Error()),
+				KeyStatusCode.Field(status),
+			)
 			writeErrorResponse(w, status)
 			return nil
 		}
 
 		// Real error.
-		h.metrics.Counter(MetricRequestsHandlerErrors).Inc()
-		span.SetTag(TraceError, "true")
-		span.SetTag(TraceErrorType, "handler")
-		slog.Error("handler error", "error", err, "handler", h.name)
+		capitan.Emit(ctx, EventHandlerError,
+			KeyHandlerName.Field(h.name),
+			KeyError.Field(err.Error()),
+		)
 		writeErrorResponse(w, http.StatusInternalServerError)
 		return err
 	}
 
 	// Validate output.
 	if validErr := h.validator.Struct(output); validErr != nil {
-		h.metrics.Counter(MetricRequestsValidationErrors).Inc()
-		span.SetTag(TraceError, "true")
-		span.SetTag(TraceErrorType, "output_validation")
-		slog.Error("output validation failed", "error", validErr, "handler", h.name)
+		capitan.Emit(ctx, EventRequestValidationOutputFailed,
+			KeyHandlerName.Field(h.name),
+			KeyError.Field(validErr.Error()),
+		)
 		writeErrorResponse(w, http.StatusInternalServerError)
 		return fmt.Errorf("output validation failed: %w", validErr)
 	}
@@ -201,10 +173,10 @@ func (h *Handler[In, Out]) Process(ctx context.Context, r *http.Request, w http.
 	// Marshal response.
 	body, err := json.Marshal(output)
 	if err != nil {
-		h.metrics.Counter(MetricRequestsMarshalErrors).Inc()
-		span.SetTag(TraceError, "true")
-		span.SetTag(TraceErrorType, "marshal")
-		slog.Error("failed to marshal response", "error", err, "handler", h.name)
+		capitan.Emit(ctx, EventRequestResponseMarshalError,
+			KeyHandlerName.Field(h.name),
+			KeyError.Field(err.Error()),
+		)
 		writeErrorResponse(w, http.StatusInternalServerError)
 		return err
 	}
@@ -219,7 +191,12 @@ func (h *Handler[In, Out]) Process(ctx context.Context, r *http.Request, w http.
 	w.WriteHeader(h.successStatus)
 	w.Write(body)
 
-	h.metrics.Counter(MetricRequestsSuccess).Inc()
+	// Emit handler success event
+	capitan.Emit(ctx, EventHandlerSuccess,
+		KeyHandlerName.Field(h.name),
+		KeyStatusCode.Field(h.successStatus),
+	)
+
 	return nil
 }
 
@@ -229,21 +206,8 @@ func (h *Handler[In, Out]) Name() string {
 }
 
 // Close implements RouteHandler.
-func (h *Handler[In, Out]) Close() error {
-	if h.tracer != nil {
-		h.tracer.Close()
-	}
+func (*Handler[In, Out]) Close() error {
 	return nil
-}
-
-// Metrics implements RouteHandler.
-func (h *Handler[In, Out]) Metrics() *metricz.Registry {
-	return h.metrics
-}
-
-// Tracer implements RouteHandler.
-func (h *Handler[In, Out]) Tracer() *tracez.Tracer {
-	return h.tracer
 }
 
 // Method implements RouteHandler.
@@ -325,8 +289,6 @@ func NewHandler[In, Out any](name string, method, path string, fn func(*Request[
 		maxBodySize:     10 * 1024 * 1024, // Default to 10MB.
 		InputMeta:       sentinel.Scan[In](),
 		OutputMeta:      sentinel.Scan[Out](),
-		metrics:         metricz.New(),
-		tracer:          tracez.New(),
 		validator:       validator.New(),
 		middleware:      make([]func(http.Handler) http.Handler, 0),
 	}

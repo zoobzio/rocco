@@ -528,38 +528,6 @@ func TestHandler_Close(t *testing.T) {
 	}
 }
 
-func TestHandler_Metrics(t *testing.T) {
-	handler := NewHandler[NoBody, testOutput](
-		"test",
-		"GET",
-		"/test",
-		func(_ *Request[NoBody]) (testOutput, error) {
-			return testOutput{}, nil
-		},
-	)
-
-	metrics := handler.Metrics()
-	if metrics == nil {
-		t.Error("expected non-nil metrics")
-	}
-}
-
-func TestHandler_Tracer(t *testing.T) {
-	handler := NewHandler[NoBody, testOutput](
-		"test",
-		"GET",
-		"/test",
-		func(_ *Request[NoBody]) (testOutput, error) {
-			return testOutput{}, nil
-		},
-	)
-
-	tracer := handler.Tracer()
-	if tracer == nil {
-		t.Error("expected non-nil tracer")
-	}
-}
-
 func TestHandler_OutputSchema(t *testing.T) {
 	handler := NewHandler[NoBody, testOutput](
 		"test",

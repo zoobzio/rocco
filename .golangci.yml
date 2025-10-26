@@ -59,7 +59,6 @@ linters-settings:
     check-blank: true
     exclude-functions:
       - (io.Closer).Close  # Handled by bodyclose
-      - (*github.com/zoobzio/hookz.Hooks[*github.com/zoobzio/rocco.Event]).Emit  # Fire-and-forget pattern
       - (net/http.ResponseWriter).Write  # Standard practice after WriteHeader
       - (*encoding/json.Encoder).Encode  # Standard practice for response encoding
 

@@ -4,51 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"sync"
-	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/zoobzio/hookz"
-	"github.com/zoobzio/metricz"
-	"github.com/zoobzio/tracez"
-)
-
-// Trace spans for Engine.
-const (
-	TraceRequestReceived tracez.Key = "engine.request.received"
-	TraceRequestProcess  tracez.Key = "engine.request.process"
-	TraceShutdown        tracez.Key = "engine.shutdown"
-)
-
-// Trace tags.
-const (
-	TagMethod     tracez.Tag = "method"
-	TagPath       tracez.Tag = "path"
-	TagRejected   tracez.Tag = "rejected"
-	TagDurationMs tracez.Tag = "duration_ms"
-)
-
-// Metric keys for Engine.
-const (
-	// Request metrics.
-	MetricRequestsReceived  metricz.Key = "engine.requests.received"
-	MetricRequestsRejected  metricz.Key = "engine.requests.rejected"
-	MetricRequestsCompleted metricz.Key = "engine.requests.completed"
-	MetricRequestDuration   metricz.Key = "engine.request.duration_ms"
-)
-
-// Hook events for Engine.
-const (
-	// Request lifecycle hooks.
-	HookRequestReceived  hookz.Key = "engine.request.received"  // Request arrived at engine.
-	HookRequestCompleted hookz.Key = "engine.request.completed" // Request finished processing.
-	HookRequestRejected  hookz.Key = "engine.request.rejected"  // Request rejected (error).
-
-	// Shutdown hooks.
-	HookShutdownStarted  hookz.Key = "engine.shutdown.started"  // Shutdown initiated.
-	HookShutdownComplete hookz.Key = "engine.shutdown.complete" // Shutdown finished.
+	"github.com/zoobzio/capitan"
 )
 
 type Engine struct {
@@ -59,9 +19,6 @@ type Engine struct {
 	handlers            []RouteHandler // Registered handlers for OpenAPI generation
 	ctx                 context.Context
 	cancel              context.CancelFunc
-	metrics             *metricz.Registry
-	tracer              *tracez.Tracer
-	hooks               *hookz.Hooks[*Event]
 	defaultHandlersOnce sync.Once
 }
 
@@ -83,9 +40,6 @@ func NewEngine(config *EngineConfig) *Engine {
 		middleware: make([]func(http.Handler) http.Handler, 0),
 		ctx:        ctx,
 		cancel:     cancel,
-		metrics:    metricz.New(),
-		tracer:     tracez.New(),
-		hooks:      hookz.New[*Event](),
 	}
 
 	// Create HTTP server
@@ -97,6 +51,12 @@ func NewEngine(config *EngineConfig) *Engine {
 		WriteTimeout: config.WriteTimeout,
 		IdleTimeout:  config.IdleTimeout,
 	}
+
+	// Emit engine created event
+	capitan.Emit(ctx, EventEngineCreated,
+		KeyHost.Field(config.Host),
+		KeyPort.Field(config.Port),
+	)
 
 	return e
 }
@@ -129,6 +89,13 @@ func (e *Engine) WithHandlers(handlers ...RouteHandler) *Engine {
 			// Register with Chi (no handler middleware).
 			e.chiRouter.Method(handler.Method(), handler.Path(), httpHandler)
 		}
+
+		// Emit handler registered event
+		capitan.Emit(e.ctx, EventHandlerRegistered,
+			KeyHandlerName.Field(handler.Name()),
+			KeyMethod.Field(handler.Method()),
+			KeyPath.Field(handler.Path()),
+		)
 	}
 	return e
 }
@@ -185,108 +152,48 @@ func (e *Engine) registerDefaultHandlers() {
 }
 
 // adaptHandler converts a RouteHandler to http.HandlerFunc.
-func (e *Engine) adaptHandler(handler RouteHandler) http.HandlerFunc {
+func (*Engine) adaptHandler(handler RouteHandler) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Start trace for this request
-		ctx, span := e.tracer.StartSpan(r.Context(), TraceRequestReceived)
-		defer span.Finish()
-		span.SetTag(TagMethod, r.Method)
-		span.SetTag(TagPath, r.URL.Path)
+		ctx := r.Context()
 
 		// Emit request received event
-		if e.hooks.ListenerCount(HookRequestReceived) > 0 {
-			event := NewRequestEvent("request.received", r, nil)
-			e.hooks.Emit(ctx, HookRequestReceived, event)
-		}
-
-		// Track incoming request
-		e.metrics.Counter(MetricRequestsReceived).Inc()
-		start := time.Now()
+		capitan.Emit(ctx, EventRequestReceived,
+			KeyMethod.Field(r.Method),
+			KeyPath.Field(r.URL.Path),
+			KeyHandlerName.Field(handler.Name()),
+		)
 
 		// Handler processes and writes response
 		err := handler.Process(ctx, r, w)
 
-		duration := time.Since(start)
-		e.metrics.Timer(MetricRequestDuration).Record(duration)
-
+		// Emit request completion event
 		if err != nil {
-			// Error occurred
-			e.metrics.Counter(MetricRequestsRejected).Inc()
-			span.SetTag(TagRejected, "handler_error")
-
-			// Emit rejection event
-			if e.hooks.ListenerCount(HookRequestRejected) > 0 {
-				event := NewRequestEvent("request.rejected", r, map[string]any{
-					"error":       err.Error(),
-					"duration_ms": float64(duration) / float64(time.Millisecond),
-				})
-				e.hooks.Emit(ctx, HookRequestRejected, event)
-			}
-			return
-		}
-
-		// Success
-		e.metrics.Counter(MetricRequestsCompleted).Inc()
-
-		// Emit completion event
-		if e.hooks.ListenerCount(HookRequestCompleted) > 0 {
-			event := NewRequestEvent("request.completed", r, map[string]any{
-				"duration_ms": float64(duration) / float64(time.Millisecond),
-			})
-			e.hooks.Emit(ctx, HookRequestCompleted, event)
+			capitan.Emit(ctx, EventRequestFailed,
+				KeyMethod.Field(r.Method),
+				KeyPath.Field(r.URL.Path),
+				KeyHandlerName.Field(handler.Name()),
+				KeyError.Field(err.Error()),
+			)
+		} else {
+			capitan.Emit(ctx, EventRequestCompleted,
+				KeyMethod.Field(r.Method),
+				KeyPath.Field(r.URL.Path),
+				KeyHandlerName.Field(handler.Name()),
+			)
 		}
 	}
-}
-
-// Metrics returns the engine's metrics registry.
-func (e *Engine) Metrics() *metricz.Registry {
-	return e.metrics
-}
-
-// Tracer returns the engine's tracer.
-func (e *Engine) Tracer() *tracez.Tracer {
-	return e.tracer
-}
-
-// Hooks returns the engine's hooks registry.
-func (e *Engine) Hooks() *hookz.Hooks[*Event] {
-	return e.hooks
-}
-
-// OnRequestReceived registers a handler for when a request arrives at the engine.
-func (e *Engine) OnRequestReceived(handler func(context.Context, *Event) error) error {
-	_, err := e.hooks.Hook(HookRequestReceived, handler)
-	return err
-}
-
-// OnRequestCompleted registers a handler for when a request finishes processing.
-func (e *Engine) OnRequestCompleted(handler func(context.Context, *Event) error) error {
-	_, err := e.hooks.Hook(HookRequestCompleted, handler)
-	return err
-}
-
-// OnRequestRejected registers a handler for when a request is rejected due to error.
-func (e *Engine) OnRequestRejected(handler func(context.Context, *Event) error) error {
-	_, err := e.hooks.Hook(HookRequestRejected, handler)
-	return err
-}
-
-// OnShutdownStarted registers a handler for when shutdown is initiated.
-func (e *Engine) OnShutdownStarted(handler func(context.Context, *Event) error) error {
-	_, err := e.hooks.Hook(HookShutdownStarted, handler)
-	return err
-}
-
-// OnShutdownComplete registers a handler for when shutdown finishes.
-func (e *Engine) OnShutdownComplete(handler func(context.Context, *Event) error) error {
-	_, err := e.hooks.Hook(HookShutdownComplete, handler)
-	return err
 }
 
 // Start begins listening for HTTP requests.
 // This method blocks until the server is shutdown.
 func (e *Engine) Start() error {
-	slog.Info("starting server", "host", e.config.Host, "port", e.config.Port)
+	// Emit engine starting event
+	capitan.Emit(e.ctx, EventEngineStarting,
+		KeyHost.Field(e.config.Host),
+		KeyPort.Field(e.config.Port),
+		KeyAddress.Field(e.server.Addr),
+	)
+
 	err := e.server.ListenAndServe()
 	if err != nil && err != http.ErrServerClosed {
 		return fmt.Errorf("server error: %w", err)
@@ -296,15 +203,8 @@ func (e *Engine) Start() error {
 
 // Shutdown performs a graceful shutdown of the engine.
 func (e *Engine) Shutdown(ctx context.Context) error {
-	// Start shutdown span
-	_, span := e.tracer.StartSpan(ctx, TraceShutdown)
-	defer span.Finish()
-
-	slog.Info("starting graceful shutdown")
-
 	// Emit shutdown started event
-	shutdownEvent := NewSystemEvent("shutdown.started", nil)
-	e.hooks.Emit(ctx, HookShutdownStarted, shutdownEvent)
+	capitan.Emit(ctx, EventEngineShutdownStarted)
 
 	// Shutdown HTTP server (waits for active connections to finish)
 	err := e.server.Shutdown(ctx)
@@ -312,24 +212,20 @@ func (e *Engine) Shutdown(ctx context.Context) error {
 	// Cancel engine context
 	e.cancel()
 
+	// Emit shutdown complete event
 	if err != nil {
-		slog.Error("shutdown error", "error", err)
-		// Emit shutdown complete event (with error)
-		errorEvent := NewSystemEvent("shutdown.complete", map[string]any{
-			"graceful": false,
-			"error":    err.Error(),
-		})
-		e.hooks.Emit(context.Background(), HookShutdownComplete, errorEvent)
-		return err
+		capitan.Emit(context.Background(), EventEngineShutdownComplete,
+			KeyGraceful.Field(false),
+			KeyError.Field(err.Error()),
+		)
+	} else {
+		capitan.Emit(context.Background(), EventEngineShutdownComplete,
+			KeyGraceful.Field(true),
+		)
 	}
 
-	slog.Info("graceful shutdown complete")
+	// Shutdown event system
+	capitan.Shutdown()
 
-	// Emit shutdown complete event
-	completeEvent := NewSystemEvent("shutdown.complete", map[string]any{
-		"graceful": true,
-	})
-	e.hooks.Emit(context.Background(), HookShutdownComplete, completeEvent)
-
-	return nil
+	return err
 }
