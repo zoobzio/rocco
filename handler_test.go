@@ -6,12 +6,24 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
 )
+
+// errorReader is a reader that always returns an error
+type errorReader struct{}
+
+func (e *errorReader) Read(p []byte) (n int, err error) {
+	return 0, errors.New("read error")
+}
+
+func (e *errorReader) Close() error {
+	return nil
+}
 
 type testInput struct {
 	Name  string `json:"name"`
@@ -559,5 +571,86 @@ func TestHandler_WithMaxBodySize(t *testing.T) {
 
 	if handler.maxBodySize != 1024 {
 		t.Errorf("expected maxBodySize 1024, got %d", handler.maxBodySize)
+	}
+}
+
+func TestHandler_Process_MaxBodySizeExceeded(t *testing.T) {
+	handler := NewHandler[testInput, testOutput](
+		"test",
+		"POST",
+		"/test",
+		func(_ *Request[testInput]) (testOutput, error) {
+			return testOutput{Message: "Should not reach here"}, nil
+		},
+	).WithMaxBodySize(10) // Very small limit
+
+	// Create body larger than limit
+	largeBody := bytes.Repeat([]byte("a"), 100)
+	req := httptest.NewRequest("POST", "/test", bytes.NewReader(largeBody))
+	w := httptest.NewRecorder()
+
+	err := handler.Process(context.Background(), req, w)
+
+	if err == nil {
+		t.Fatal("expected error for body size exceeded")
+	}
+	if w.Code != 422 {
+		t.Errorf("expected status 422, got %d", w.Code)
+	}
+}
+
+func TestHandler_Process_BodyReadError(t *testing.T) {
+	handler := NewHandler[testInput, testOutput](
+		"test",
+		"POST",
+		"/test",
+		func(_ *Request[testInput]) (testOutput, error) {
+			return testOutput{}, nil
+		},
+	)
+
+	req := httptest.NewRequest("POST", "/test", nil)
+	req.Body = io.NopCloser(&errorReader{})
+	w := httptest.NewRecorder()
+
+	err := handler.Process(context.Background(), req, w)
+
+	if err == nil {
+		t.Fatal("expected error from body read")
+	}
+	if w.Code != 400 {
+		t.Errorf("expected status 400, got %d", w.Code)
+	}
+}
+
+func TestHandler_Process_ResponseHeaders(t *testing.T) {
+	handler := NewHandler[NoBody, testOutput](
+		"test",
+		"GET",
+		"/test",
+		func(_ *Request[NoBody]) (testOutput, error) {
+			return testOutput{Message: "OK"}, nil
+		},
+	).WithResponseHeaders(map[string]string{
+		"X-Custom-Header": "custom-value",
+		"X-API-Version":   "1.0",
+	})
+
+	req := httptest.NewRequest("GET", "/test", nil)
+	w := httptest.NewRecorder()
+
+	err := handler.Process(context.Background(), req, w)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if w.Header().Get("X-Custom-Header") != "custom-value" {
+		t.Errorf("expected X-Custom-Header 'custom-value', got %q", w.Header().Get("X-Custom-Header"))
+	}
+	if w.Header().Get("X-API-Version") != "1.0" {
+		t.Errorf("expected X-API-Version '1.0', got %q", w.Header().Get("X-API-Version"))
+	}
+	if w.Header().Get("Content-Type") != "application/json" {
+		t.Errorf("expected Content-Type 'application/json', got %q", w.Header().Get("Content-Type"))
 	}
 }

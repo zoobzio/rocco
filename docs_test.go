@@ -804,3 +804,228 @@ func TestParseExample(t *testing.T) {
 func intPtr(i int) *int             { return &i }
 func float64Ptr(f float64) *float64 { return &f }
 func boolPtr(b bool) *bool          { return &b }
+
+func TestParseJSONTag_EmptyName(t *testing.T) {
+	field := sentinel.FieldMetadata{
+		Name: "MyField",
+		Tags: map[string]string{"json": ",omitempty"},
+	}
+
+	name, required := parseJSONTag(field)
+
+	if name != "myfield" {
+		t.Errorf("expected name 'myfield', got %q", name)
+	}
+	if required {
+		t.Error("expected required=false with omitempty")
+	}
+}
+
+func TestMetadataToSchema_SkipJSONDashFields(t *testing.T) {
+	meta := sentinel.ModelMetadata{
+		TypeName: "TestModel",
+		Fields: []sentinel.FieldMetadata{
+			{
+				Name: "IncludedField",
+				Type: "string",
+				Tags: map[string]string{
+					"json": "included",
+				},
+			},
+			{
+				Name: "SkippedField",
+				Type: "string",
+				Tags: map[string]string{
+					"json": "-",
+				},
+			},
+		},
+	}
+
+	schema := metadataToSchema(meta)
+
+	if len(schema.Properties) != 1 {
+		t.Errorf("expected 1 property (skipping json:\"-\"), got %d", len(schema.Properties))
+	}
+	if _, exists := schema.Properties["included"]; !exists {
+		t.Error("expected 'included' property to exist")
+	}
+	if _, exists := schema.Properties["-"]; exists {
+		t.Error("did not expect '-' property to exist")
+	}
+}
+
+func TestParseValidateTag_GteLte(t *testing.T) {
+	field := sentinel.FieldMetadata{
+		Name: "Score",
+		Type: "int",
+		Tags: map[string]string{
+			"validate": "gte=0,lte=100",
+		},
+	}
+
+	schema := &Schema{Type: "integer"}
+	applyOpenAPITags(schema, field)
+
+	if schema.Minimum == nil || *schema.Minimum != 0 {
+		t.Errorf("expected minimum 0 from gte, got %v", schema.Minimum)
+	}
+	if schema.Maximum == nil || *schema.Maximum != 100 {
+		t.Errorf("expected maximum 100 from lte, got %v", schema.Maximum)
+	}
+}
+
+func TestParseValidateTag_GtLt(t *testing.T) {
+	field := sentinel.FieldMetadata{
+		Name: "Value",
+		Type: "float64",
+		Tags: map[string]string{
+			"validate": "gt=0,lt=1",
+		},
+	}
+
+	schema := &Schema{Type: "number"}
+	applyOpenAPITags(schema, field)
+
+	if schema.Minimum == nil || *schema.Minimum != 0 {
+		t.Errorf("expected minimum 0 from gt, got %v", schema.Minimum)
+	}
+	if schema.ExclusiveMinimum == nil || *schema.ExclusiveMinimum != true {
+		t.Errorf("expected exclusiveMinimum true from gt, got %v", schema.ExclusiveMinimum)
+	}
+	if schema.Maximum == nil || *schema.Maximum != 1 {
+		t.Errorf("expected maximum 1 from lt, got %v", schema.Maximum)
+	}
+	if schema.ExclusiveMaximum == nil || *schema.ExclusiveMaximum != true {
+		t.Errorf("expected exclusiveMaximum true from lt, got %v", schema.ExclusiveMaximum)
+	}
+}
+
+func TestParseValidateTag_StringLen(t *testing.T) {
+	field := sentinel.FieldMetadata{
+		Name: "Code",
+		Type: "string",
+		Tags: map[string]string{
+			"validate": "len=5",
+		},
+	}
+
+	schema := &Schema{Type: "string"}
+	applyOpenAPITags(schema, field)
+
+	if schema.MinLength == nil || *schema.MinLength != 5 {
+		t.Errorf("expected minLength 5 from len, got %v", schema.MinLength)
+	}
+	if schema.MaxLength == nil || *schema.MaxLength != 5 {
+		t.Errorf("expected maxLength 5 from len, got %v", schema.MaxLength)
+	}
+}
+
+func TestParseValidateTag_URLFormat(t *testing.T) {
+	field := sentinel.FieldMetadata{
+		Name: "Website",
+		Type: "string",
+		Tags: map[string]string{
+			"validate": "url",
+		},
+	}
+
+	schema := &Schema{Type: "string"}
+	applyOpenAPITags(schema, field)
+
+	if schema.Format != "uri" {
+		t.Errorf("expected format 'uri' from url validation, got %q", schema.Format)
+	}
+}
+
+func TestParseValidateTag_UUIDFormats(t *testing.T) {
+	tests := []string{"uuid", "uuid4", "uuid5"}
+
+	for _, validateTag := range tests {
+		t.Run(validateTag, func(t *testing.T) {
+			field := sentinel.FieldMetadata{
+				Name: "ID",
+				Type: "string",
+				Tags: map[string]string{
+					"validate": validateTag,
+				},
+			}
+
+			schema := &Schema{Type: "string"}
+			applyOpenAPITags(schema, field)
+
+			if schema.Format != "uuid" {
+				t.Errorf("expected format 'uuid' from %s validation, got %q", validateTag, schema.Format)
+			}
+		})
+	}
+}
+
+func TestParseValidateTag_IPFormats(t *testing.T) {
+	tests := []struct {
+		tag    string
+		format string
+	}{
+		{"ipv4", "ipv4"},
+		{"ipv6", "ipv6"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.tag, func(t *testing.T) {
+			field := sentinel.FieldMetadata{
+				Name: "Address",
+				Type: "string",
+				Tags: map[string]string{
+					"validate": tt.tag,
+				},
+			}
+
+			schema := &Schema{Type: "string"}
+			applyOpenAPITags(schema, field)
+
+			if schema.Format != tt.format {
+				t.Errorf("expected format %q from %s validation, got %q", tt.format, tt.tag, schema.Format)
+			}
+		})
+	}
+}
+
+func TestParseValidateTag_DateTime(t *testing.T) {
+	field := sentinel.FieldMetadata{
+		Name: "CreatedAt",
+		Type: "string",
+		Tags: map[string]string{
+			"validate": "datetime",
+		},
+	}
+
+	schema := &Schema{Type: "string"}
+	applyOpenAPITags(schema, field)
+
+	if schema.Format != "date-time" {
+		t.Errorf("expected format 'date-time' from datetime validation, got %q", schema.Format)
+	}
+}
+
+func TestParseEnum_InvalidNumbers(t *testing.T) {
+	// Test that invalid integer/float values are skipped
+	tests := []struct {
+		name       string
+		value      string
+		schemaType string
+		wantLen    int
+	}{
+		{"invalid integers", "1,invalid,3", "integer", 2},
+		{"invalid floats", "1.5,invalid,3.5", "number", 2},
+		{"invalid booleans", "true,invalid,false", "boolean", 2},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := parseEnum(tt.value, tt.schemaType)
+			if len(got) != tt.wantLen {
+				t.Errorf("parseEnum(%q, %q) length = %d, want %d", tt.value, tt.schemaType, len(got), tt.wantLen)
+			}
+		})
+	}
+}

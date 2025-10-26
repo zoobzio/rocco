@@ -3,6 +3,7 @@ package rocco
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -351,5 +352,30 @@ func TestEngine_Register_NoHandlerMiddleware(t *testing.T) {
 
 	if w.Code != 200 {
 		t.Errorf("expected status 200, got %d", w.Code)
+	}
+}
+
+func TestEngine_AdaptHandler_ErrorPath(t *testing.T) {
+	engine := NewEngine(nil)
+
+	// Handler that returns an error (using errors.New to trigger the real error path)
+	errorHandler := NewHandler[NoBody, testOutput](
+		"error-handler",
+		"GET",
+		"/error",
+		func(_ *Request[NoBody]) (testOutput, error) {
+			return testOutput{}, errors.New("unexpected error")
+		},
+	)
+
+	engine.WithHandlers(errorHandler)
+
+	req := httptest.NewRequest("GET", "/error", nil)
+	w := httptest.NewRecorder()
+	engine.chiRouter.ServeHTTP(w, req)
+
+	// Should get 500 status for internal server error
+	if w.Code != 500 {
+		t.Errorf("expected status 500, got %d", w.Code)
 	}
 }
