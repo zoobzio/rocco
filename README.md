@@ -304,9 +304,9 @@ Rocco emits lifecycle events via [capitan](https://github.com/zoobzio/capitan), 
 ```go
 import "github.com/zoobzio/capitan"
 
-capitan.Hook(rocco.EventRequestReceived, func(ctx context.Context, e *capitan.Event) {
-    method, _ := rocco.KeyMethod.From(e)
-    path, _ := rocco.KeyPath.From(e)
+capitan.Hook(rocco.RequestReceived, func(ctx context.Context, e *capitan.Event) {
+    method, _ := rocco.MethodKey.From(e)
+    path, _ := rocco.PathKey.From(e)
     log.Printf("Request: %s %s", method, path)
 })
 ```
@@ -323,36 +323,37 @@ capitan.Observe(func(ctx context.Context, e *capitan.Event) {
 
 | Signal | Description | Fields |
 |--------|-------------|--------|
-| `EventEngineCreated` | Engine instance created | `host`, `port` |
-| `EventEngineStarting` | Server starting to listen | `host`, `port`, `address` |
-| `EventEngineShutdownStarted` | Shutdown initiated | - |
-| `EventEngineShutdownComplete` | Shutdown finished | `graceful`, `error` (if failed) |
-| `EventHandlerRegistered` | Handler registered with engine | `handler_name`, `method`, `path` |
-| `EventRequestReceived` | Request received | `method`, `path`, `handler_name` |
-| `EventRequestCompleted` | Request succeeded | `method`, `path`, `handler_name` |
-| `EventRequestFailed` | Request failed | `method`, `path`, `handler_name`, `error` |
-| `EventHandlerExecuting` | Handler function starting | `handler_name` |
-| `EventHandlerSuccess` | Handler returned successfully | `handler_name`, `status_code` |
-| `EventHandlerError` | Handler returned error | `handler_name`, `error` |
-| `EventHandlerSentinelError` | Declared sentinel error returned | `handler_name`, `error`, `status_code` |
-| `EventHandlerUndeclaredSentinel` | Undeclared sentinel error (bug) | `handler_name`, `error`, `status_code` |
-| `EventRequestParamsInvalid` | Path/query param extraction failed | `handler_name`, `error` |
-| `EventRequestBodyReadError` | Failed to read request body | `handler_name`, `error` |
-| `EventRequestBodyParseError` | Failed to parse JSON body | `handler_name`, `error` |
-| `EventRequestValidationInputFailed` | Input validation failed | `handler_name`, `error` |
-| `EventRequestValidationOutputFailed` | Output validation failed | `handler_name`, `error` |
-| `EventRequestResponseMarshalError` | Failed to marshal response | `handler_name`, `error` |
+| `EngineCreated` (`http.engine.created`) | Engine instance created | `host`, `port` |
+| `EngineStarting` (`http.engine.starting`) | Server starting to listen | `host`, `port`, `address` |
+| `EngineShutdownStarted` (`http.engine.shutdown.started`) | Shutdown initiated | - |
+| `EngineShutdownComplete` (`http.engine.shutdown.complete`) | Shutdown finished | `graceful`, `error` (if failed) |
+| `HandlerRegistered` (`http.handler.registered`) | Handler registered with engine | `handler_name`, `method`, `path` |
+| `RequestReceived` (`http.request.received`) | Request received | `method`, `path`, `handler_name` |
+| `RequestCompleted` (`http.request.completed`) | Request succeeded | `method`, `path`, `handler_name`, `status_code`, `duration_ms` |
+| `RequestFailed` (`http.request.failed`) | Request failed | `method`, `path`, `handler_name`, `status_code`, `duration_ms`, `error` |
+| `HandlerExecuting` (`http.handler.executing`) | Handler function starting | `handler_name` |
+| `HandlerSuccess` (`http.handler.success`) | Handler returned successfully | `handler_name`, `status_code` |
+| `HandlerError` (`http.handler.error`) | Handler returned error | `handler_name`, `error` |
+| `HandlerSentinelError` (`http.handler.sentinel.error`) | Declared sentinel error returned | `handler_name`, `error`, `status_code` |
+| `HandlerUndeclaredSentinel` (`http.handler.sentinel.undeclared`) | Undeclared sentinel error (bug) | `handler_name`, `error`, `status_code` |
+| `RequestParamsInvalid` (`http.request.params.invalid`) | Path/query param extraction failed | `handler_name`, `error` |
+| `RequestBodyReadError` (`http.request.body.read.error`) | Failed to read request body | `handler_name`, `error` |
+| `RequestBodyParseError` (`http.request.body.parse.error`) | Failed to parse JSON body | `handler_name`, `error` |
+| `RequestValidationInputFailed` (`http.request.validation.input.failed`) | Input validation failed | `handler_name`, `error` |
+| `RequestValidationOutputFailed` (`http.request.validation.output.failed`) | Output validation failed | `handler_name`, `error` |
+| `RequestResponseMarshalError` (`http.request.response.marshal.error`) | Failed to marshal response | `handler_name`, `error` |
 
 **Field Keys:**
-- `KeyHost` (string) - Server host
-- `KeyPort` (int) - Server port
-- `KeyAddress` (string) - Server address (host:port)
-- `KeyMethod` (string) - HTTP method
-- `KeyPath` (string) - Request path
-- `KeyHandlerName` (string) - Handler identifier
-- `KeyStatusCode` (int) - HTTP status code
-- `KeyError` (string) - Error message
-- `KeyGraceful` (bool) - Graceful shutdown success
+- `HostKey` (string) - Server host
+- `PortKey` (int) - Server port
+- `AddressKey` (string) - Server address (host:port)
+- `MethodKey` (string) - HTTP method
+- `PathKey` (string) - Request path
+- `HandlerNameKey` (string) - Handler identifier
+- `StatusCodeKey` (int) - HTTP status code
+- `DurationMsKey` (int64) - Request duration in milliseconds
+- `ErrorKey` (string) - Error message
+- `GracefulKey` (bool) - Graceful shutdown success
 
 All events and keys are exported constants in the `rocco` package for type-safe access.
 

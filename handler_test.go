@@ -125,7 +125,7 @@ func TestHandler_Process_Success(t *testing.T) {
 	req := httptest.NewRequest("POST", "/test", bytes.NewReader(body))
 	w := httptest.NewRecorder()
 
-	err := handler.Process(context.Background(), req, w)
+	_, err := handler.Process(context.Background(), req, w)
 
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -158,7 +158,7 @@ func TestHandler_Process_NoBody(t *testing.T) {
 	req := httptest.NewRequest("GET", "/test", nil)
 	w := httptest.NewRecorder()
 
-	err := handler.Process(context.Background(), req, w)
+	_, err := handler.Process(context.Background(), req, w)
 
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -181,7 +181,7 @@ func TestHandler_Process_InvalidJSON(t *testing.T) {
 	req := httptest.NewRequest("POST", "/test", bytes.NewReader([]byte("invalid json")))
 	w := httptest.NewRecorder()
 
-	err := handler.Process(context.Background(), req, w)
+	_, err := handler.Process(context.Background(), req, w)
 
 	if err == nil {
 		t.Fatal("expected error for invalid JSON")
@@ -204,7 +204,7 @@ func TestHandler_Process_DeclaredSentinelError(t *testing.T) {
 	req := httptest.NewRequest("GET", "/test", nil)
 	w := httptest.NewRecorder()
 
-	err := handler.Process(context.Background(), req, w)
+	_, err := handler.Process(context.Background(), req, w)
 
 	// Declared sentinel should return nil error (successfully handled)
 	if err != nil {
@@ -234,7 +234,7 @@ func TestHandler_Process_UndeclaredSentinelError(t *testing.T) {
 	req := httptest.NewRequest("GET", "/test", nil)
 	w := httptest.NewRecorder()
 
-	err := handler.Process(context.Background(), req, w)
+	_, err := handler.Process(context.Background(), req, w)
 
 	// Undeclared sentinel should return error with 500
 	if err == nil {
@@ -262,7 +262,7 @@ func TestHandler_Process_RealError(t *testing.T) {
 	req := httptest.NewRequest("GET", "/test", nil)
 	w := httptest.NewRecorder()
 
-	err := handler.Process(context.Background(), req, w)
+	_, err := handler.Process(context.Background(), req, w)
 
 	if err != testErr {
 		t.Errorf("expected error %v, got %v", testErr, err)
@@ -433,7 +433,7 @@ func TestHandler_ValidationInput(t *testing.T) {
 	req := httptest.NewRequest("POST", "/test", bytes.NewReader([]byte(invalidInput)))
 	w := httptest.NewRecorder()
 
-	err := handler.Process(context.Background(), req, w)
+	_, err := handler.Process(context.Background(), req, w)
 
 	if err == nil {
 		t.Fatal("expected validation error")
@@ -467,7 +467,7 @@ func TestHandler_ValidationOutput(t *testing.T) {
 	req := httptest.NewRequest("GET", "/test", nil)
 	w := httptest.NewRecorder()
 
-	err := handler.Process(context.Background(), req, w)
+	_, err := handler.Process(context.Background(), req, w)
 
 	if err == nil {
 		t.Fatal("expected validation error")
@@ -589,7 +589,7 @@ func TestHandler_Process_MaxBodySizeExceeded(t *testing.T) {
 	req := httptest.NewRequest("POST", "/test", bytes.NewReader(largeBody))
 	w := httptest.NewRecorder()
 
-	err := handler.Process(context.Background(), req, w)
+	_, err := handler.Process(context.Background(), req, w)
 
 	if err == nil {
 		t.Fatal("expected error for body size exceeded")
@@ -613,7 +613,7 @@ func TestHandler_Process_BodyReadError(t *testing.T) {
 	req.Body = io.NopCloser(&errorReader{})
 	w := httptest.NewRecorder()
 
-	err := handler.Process(context.Background(), req, w)
+	_, err := handler.Process(context.Background(), req, w)
 
 	if err == nil {
 		t.Fatal("expected error from body read")
@@ -639,7 +639,7 @@ func TestHandler_Process_ResponseHeaders(t *testing.T) {
 	req := httptest.NewRequest("GET", "/test", nil)
 	w := httptest.NewRecorder()
 
-	err := handler.Process(context.Background(), req, w)
+	_, err := handler.Process(context.Background(), req, w)
 
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

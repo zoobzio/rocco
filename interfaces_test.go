@@ -9,7 +9,7 @@ import (
 
 // Mock implementation of RouteHandler for testing
 type mockHandler struct {
-	processFunc func(ctx context.Context, r *http.Request, w http.ResponseWriter) error
+	processFunc func(ctx context.Context, r *http.Request, w http.ResponseWriter) (int, error)
 	name        string
 	method      string
 	path        string
@@ -22,11 +22,11 @@ type mockHandler struct {
 	errorCodes  []int
 }
 
-func (m *mockHandler) Process(ctx context.Context, r *http.Request, w http.ResponseWriter) error {
+func (m *mockHandler) Process(ctx context.Context, r *http.Request, w http.ResponseWriter) (int, error) {
 	if m.processFunc != nil {
 		return m.processFunc(ctx, r, w)
 	}
-	return nil
+	return http.StatusOK, nil
 }
 
 func (m *mockHandler) Name() string          { return m.name }
@@ -104,27 +104,30 @@ func TestRouteHandler_Interface(t *testing.T) {
 func TestRouteHandler_Process(t *testing.T) {
 	called := false
 	handler := &mockHandler{
-		processFunc: func(_ context.Context, _ *http.Request, w http.ResponseWriter) error {
+		processFunc: func(_ context.Context, _ *http.Request, w http.ResponseWriter) (int, error) {
 			called = true
-			w.WriteHeader(200)
+			w.WriteHeader(http.StatusOK)
 			w.Write([]byte("OK"))
-			return nil
+			return http.StatusOK, nil
 		},
 	}
 
 	req := httptest.NewRequest("GET", "/test", nil)
 	w := httptest.NewRecorder()
 
-	err := handler.Process(context.Background(), req, w)
+	status, err := handler.Process(context.Background(), req, w)
 
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
+	if status != http.StatusOK {
+		t.Errorf("expected status %d, got %d", http.StatusOK, status)
+	}
 	if !called {
 		t.Error("process function was not called")
 	}
-	if w.Code != 200 {
-		t.Errorf("expected status 200, got %d", w.Code)
+	if w.Code != http.StatusOK {
+		t.Errorf("expected status %d, got %d", http.StatusOK, w.Code)
 	}
 	if w.Body.String() != "OK" {
 		t.Errorf("expected body 'OK', got %q", w.Body.String())

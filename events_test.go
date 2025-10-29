@@ -34,10 +34,10 @@ func TestEvents_EngineCreated(t *testing.T) {
 	var host string
 	var port int
 
-	listener := capitan.Hook(EventEngineCreated, func(_ context.Context, e *capitan.Event) {
+	listener := capitan.Hook(EngineCreated, func(_ context.Context, e *capitan.Event) {
 		received = true
-		host, _ = KeyHost.From(e)
-		port, _ = KeyPort.From(e)
+		host, _ = HostKey.From(e)
+		port, _ = PortKey.From(e)
 	})
 	defer listener.Close()
 
@@ -45,7 +45,7 @@ func TestEvents_EngineCreated(t *testing.T) {
 	_ = NewEngine(config)
 
 	if !received {
-		t.Error("EventEngineCreated not emitted")
+		t.Error("EngineCreated not emitted")
 	}
 	if host != "localhost" {
 		t.Errorf("expected host 'localhost', got %q", host)
@@ -61,11 +61,11 @@ func TestEvents_HandlerRegistered(t *testing.T) {
 	var received bool
 	var handlerName, method, path string
 
-	listener := capitan.Hook(EventHandlerRegistered, func(_ context.Context, e *capitan.Event) {
+	listener := capitan.Hook(HandlerRegistered, func(_ context.Context, e *capitan.Event) {
 		received = true
-		handlerName, _ = KeyHandlerName.From(e)
-		method, _ = KeyMethod.From(e)
-		path, _ = KeyPath.From(e)
+		handlerName, _ = HandlerNameKey.From(e)
+		method, _ = MethodKey.From(e)
+		path, _ = PathKey.From(e)
 	})
 	defer listener.Close()
 
@@ -81,7 +81,7 @@ func TestEvents_HandlerRegistered(t *testing.T) {
 	engine.WithHandlers(handler)
 
 	if !received {
-		t.Error("EventHandlerRegistered not emitted")
+		t.Error("HandlerRegistered not emitted")
 	}
 	if handlerName != "test-handler" {
 		t.Errorf("expected handler name 'test-handler', got %q", handlerName)
@@ -101,16 +101,16 @@ func TestEvents_RequestLifecycle_Success(t *testing.T) {
 	var requestReceived, requestCompleted bool
 	var reqMethod, reqPath, reqHandler string
 
-	listener1 := capitan.Hook(EventRequestReceived, func(_ context.Context, e *capitan.Event) {
+	listener1 := capitan.Hook(RequestReceived, func(_ context.Context, e *capitan.Event) {
 		receivedCount++
 		requestReceived = true
-		reqMethod, _ = KeyMethod.From(e)
-		reqPath, _ = KeyPath.From(e)
-		reqHandler, _ = KeyHandlerName.From(e)
+		reqMethod, _ = MethodKey.From(e)
+		reqPath, _ = PathKey.From(e)
+		reqHandler, _ = HandlerNameKey.From(e)
 	})
 	defer listener1.Close()
 
-	listener2 := capitan.Hook(EventRequestCompleted, func(_ context.Context, e *capitan.Event) {
+	listener2 := capitan.Hook(RequestCompleted, func(_ context.Context, e *capitan.Event) {
 		receivedCount++
 		requestCompleted = true
 	})
@@ -132,10 +132,10 @@ func TestEvents_RequestLifecycle_Success(t *testing.T) {
 	engine.chiRouter.ServeHTTP(w, req)
 
 	if !requestReceived {
-		t.Error("EventRequestReceived not emitted")
+		t.Error("RequestReceived not emitted")
 	}
 	if !requestCompleted {
-		t.Error("EventRequestCompleted not emitted")
+		t.Error("RequestCompleted not emitted")
 	}
 	if reqMethod != "GET" {
 		t.Errorf("expected method 'GET', got %q", reqMethod)
@@ -154,9 +154,9 @@ func TestEvents_RequestLifecycle_Failed(t *testing.T) {
 	var requestFailed bool
 	var errorMsg string
 
-	listener := capitan.Hook(EventRequestFailed, func(_ context.Context, e *capitan.Event) {
+	listener := capitan.Hook(RequestFailed, func(_ context.Context, e *capitan.Event) {
 		requestFailed = true
-		errorMsg, _ = KeyError.From(e)
+		errorMsg, _ = ErrorKey.From(e)
 	})
 	defer listener.Close()
 
@@ -176,7 +176,7 @@ func TestEvents_RequestLifecycle_Failed(t *testing.T) {
 	engine.chiRouter.ServeHTTP(w, req)
 
 	if !requestFailed {
-		t.Error("EventRequestFailed not emitted")
+		t.Error("RequestFailed not emitted")
 	}
 	if !strings.Contains(errorMsg, "internal server") {
 		t.Errorf("expected error to contain 'internal server', got %q", errorMsg)
@@ -189,9 +189,9 @@ func TestEvents_HandlerExecuting(t *testing.T) {
 	var handlerExecuting bool
 	var handlerName string
 
-	listener := capitan.Hook(EventHandlerExecuting, func(_ context.Context, e *capitan.Event) {
+	listener := capitan.Hook(HandlerExecuting, func(_ context.Context, e *capitan.Event) {
 		handlerExecuting = true
-		handlerName, _ = KeyHandlerName.From(e)
+		handlerName, _ = HandlerNameKey.From(e)
 	})
 	defer listener.Close()
 
@@ -211,7 +211,7 @@ func TestEvents_HandlerExecuting(t *testing.T) {
 	engine.chiRouter.ServeHTTP(w, req)
 
 	if !handlerExecuting {
-		t.Error("EventHandlerExecuting not emitted")
+		t.Error("HandlerExecuting not emitted")
 	}
 	if handlerName != "exec-handler" {
 		t.Errorf("expected handler 'exec-handler', got %q", handlerName)
@@ -224,9 +224,9 @@ func TestEvents_HandlerSuccess(t *testing.T) {
 	var handlerSuccess bool
 	var statusCode int
 
-	listener := capitan.Hook(EventHandlerSuccess, func(_ context.Context, e *capitan.Event) {
+	listener := capitan.Hook(HandlerSuccess, func(_ context.Context, e *capitan.Event) {
 		handlerSuccess = true
-		statusCode, _ = KeyStatusCode.From(e)
+		statusCode, _ = StatusCodeKey.From(e)
 	})
 	defer listener.Close()
 
@@ -246,7 +246,7 @@ func TestEvents_HandlerSuccess(t *testing.T) {
 	engine.chiRouter.ServeHTTP(w, req)
 
 	if !handlerSuccess {
-		t.Error("EventHandlerSuccess not emitted")
+		t.Error("HandlerSuccess not emitted")
 	}
 	if statusCode != http.StatusCreated {
 		t.Errorf("expected status 201, got %d", statusCode)
@@ -259,9 +259,9 @@ func TestEvents_HandlerError(t *testing.T) {
 	var handlerError bool
 	var errorMsg string
 
-	listener := capitan.Hook(EventHandlerError, func(_ context.Context, e *capitan.Event) {
+	listener := capitan.Hook(HandlerError, func(_ context.Context, e *capitan.Event) {
 		handlerError = true
-		errorMsg, _ = KeyError.From(e)
+		errorMsg, _ = ErrorKey.From(e)
 	})
 	defer listener.Close()
 
@@ -281,7 +281,7 @@ func TestEvents_HandlerError(t *testing.T) {
 	engine.chiRouter.ServeHTTP(w, req)
 
 	if !handlerError {
-		t.Error("EventHandlerError not emitted")
+		t.Error("HandlerError not emitted")
 	}
 	if errorMsg == "" {
 		t.Error("expected error message")
@@ -295,10 +295,10 @@ func TestEvents_HandlerSentinelError(t *testing.T) {
 	var statusCode int
 	var errorMsg string
 
-	listener := capitan.Hook(EventHandlerSentinelError, func(_ context.Context, e *capitan.Event) {
+	listener := capitan.Hook(HandlerSentinelError, func(_ context.Context, e *capitan.Event) {
 		sentinelError = true
-		statusCode, _ = KeyStatusCode.From(e)
-		errorMsg, _ = KeyError.From(e)
+		statusCode, _ = StatusCodeKey.From(e)
+		errorMsg, _ = ErrorKey.From(e)
 	})
 	defer listener.Close()
 
@@ -318,7 +318,7 @@ func TestEvents_HandlerSentinelError(t *testing.T) {
 	engine.chiRouter.ServeHTTP(w, req)
 
 	if !sentinelError {
-		t.Error("EventHandlerSentinelError not emitted")
+		t.Error("HandlerSentinelError not emitted")
 	}
 	if statusCode != http.StatusNotFound {
 		t.Errorf("expected status 404, got %d", statusCode)
@@ -334,9 +334,9 @@ func TestEvents_HandlerUndeclaredSentinel(t *testing.T) {
 	var undeclaredSentinel bool
 	var statusCode int
 
-	listener := capitan.Hook(EventHandlerUndeclaredSentinel, func(_ context.Context, e *capitan.Event) {
+	listener := capitan.Hook(HandlerUndeclaredSentinel, func(_ context.Context, e *capitan.Event) {
 		undeclaredSentinel = true
-		statusCode, _ = KeyStatusCode.From(e)
+		statusCode, _ = StatusCodeKey.From(e)
 	})
 	defer listener.Close()
 
@@ -356,7 +356,7 @@ func TestEvents_HandlerUndeclaredSentinel(t *testing.T) {
 	engine.chiRouter.ServeHTTP(w, req)
 
 	if !undeclaredSentinel {
-		t.Error("EventHandlerUndeclaredSentinel not emitted")
+		t.Error("HandlerUndeclaredSentinel not emitted")
 	}
 	if statusCode != http.StatusNotFound {
 		t.Errorf("expected status 404, got %d", statusCode)
@@ -369,9 +369,9 @@ func TestEvents_RequestBodyParseError(t *testing.T) {
 	var parseError bool
 	var errorMsg string
 
-	listener := capitan.Hook(EventRequestBodyParseError, func(_ context.Context, e *capitan.Event) {
+	listener := capitan.Hook(RequestBodyParseError, func(_ context.Context, e *capitan.Event) {
 		parseError = true
-		errorMsg, _ = KeyError.From(e)
+		errorMsg, _ = ErrorKey.From(e)
 	})
 	defer listener.Close()
 
@@ -392,7 +392,7 @@ func TestEvents_RequestBodyParseError(t *testing.T) {
 	engine.chiRouter.ServeHTTP(w, req)
 
 	if !parseError {
-		t.Error("EventRequestBodyParseError not emitted")
+		t.Error("RequestBodyParseError not emitted")
 	}
 	if errorMsg == "" {
 		t.Error("expected error message")
@@ -405,9 +405,9 @@ func TestEvents_RequestValidationInputFailed(t *testing.T) {
 	var validationFailed bool
 	var errorMsg string
 
-	listener := capitan.Hook(EventRequestValidationInputFailed, func(_ context.Context, e *capitan.Event) {
+	listener := capitan.Hook(RequestValidationInputFailed, func(_ context.Context, e *capitan.Event) {
 		validationFailed = true
-		errorMsg, _ = KeyError.From(e)
+		errorMsg, _ = ErrorKey.From(e)
 	})
 	defer listener.Close()
 
@@ -433,7 +433,7 @@ func TestEvents_RequestValidationInputFailed(t *testing.T) {
 	engine.chiRouter.ServeHTTP(w, req)
 
 	if !validationFailed {
-		t.Error("EventRequestValidationInputFailed not emitted")
+		t.Error("RequestValidationInputFailed not emitted")
 	}
 	if errorMsg == "" {
 		t.Error("expected error message")
@@ -446,9 +446,9 @@ func TestEvents_RequestValidationOutputFailed(t *testing.T) {
 	var validationFailed bool
 	var errorMsg string
 
-	listener := capitan.Hook(EventRequestValidationOutputFailed, func(_ context.Context, e *capitan.Event) {
+	listener := capitan.Hook(RequestValidationOutputFailed, func(_ context.Context, e *capitan.Event) {
 		validationFailed = true
-		errorMsg, _ = KeyError.From(e)
+		errorMsg, _ = ErrorKey.From(e)
 	})
 	defer listener.Close()
 
@@ -473,7 +473,7 @@ func TestEvents_RequestValidationOutputFailed(t *testing.T) {
 	engine.chiRouter.ServeHTTP(w, req)
 
 	if !validationFailed {
-		t.Error("EventRequestValidationOutputFailed not emitted")
+		t.Error("RequestValidationOutputFailed not emitted")
 	}
 	if errorMsg == "" {
 		t.Error("expected error message")
@@ -486,14 +486,14 @@ func TestEvents_EngineShutdown(t *testing.T) {
 	var shutdownStarted, shutdownComplete bool
 	var graceful bool
 
-	listener1 := capitan.Hook(EventEngineShutdownStarted, func(_ context.Context, e *capitan.Event) {
+	listener1 := capitan.Hook(EngineShutdownStarted, func(_ context.Context, e *capitan.Event) {
 		shutdownStarted = true
 	})
 	defer listener1.Close()
 
-	listener2 := capitan.Hook(EventEngineShutdownComplete, func(_ context.Context, e *capitan.Event) {
+	listener2 := capitan.Hook(EngineShutdownComplete, func(_ context.Context, e *capitan.Event) {
 		shutdownComplete = true
-		graceful, _ = KeyGraceful.From(e)
+		graceful, _ = GracefulKey.From(e)
 	})
 	defer listener2.Close()
 
@@ -518,10 +518,10 @@ func TestEvents_EngineShutdown(t *testing.T) {
 	}
 
 	if !shutdownStarted {
-		t.Error("EventEngineShutdownStarted not emitted")
+		t.Error("EngineShutdownStarted not emitted")
 	}
 	if !shutdownComplete {
-		t.Error("EventEngineShutdownComplete not emitted")
+		t.Error("EngineShutdownComplete not emitted")
 	}
 	if !graceful {
 		t.Error("expected graceful shutdown")

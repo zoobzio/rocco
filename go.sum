@@ -20,6 +20,8 @@ github.com/stretchr/testify v1.8.4 h1:CcVxjf3Q8PM0mHUKJCdn+eZZtm5yQwehR5yeSVQQcU
 github.com/stretchr/testify v1.8.4/go.mod h1:sz/lmYIOXD/1dqDmKjjqLyZ2RngseejIcXlSw2iwfAo=
 github.com/zoobzio/capitan v0.0.3 h1:tkgmUcFUfXma5D7txnY9Vjt/HjKD9iN3oLGlWvJjF5s=
 github.com/zoobzio/capitan v0.0.3/go.mod h1:/OwNDIB1CHxwSzsF4e48B2+2e/IMIvTb0ZMgVeNyYig=
+github.com/zoobzio/capitan v0.0.4 h1:iflw0EOUm5cLKzgy26hWDq6yfI60rRHFl0YbLUo3UDg=
+github.com/zoobzio/capitan v0.0.4/go.mod h1:/OwNDIB1CHxwSzsF4e48B2+2e/IMIvTb0ZMgVeNyYig=
 github.com/zoobzio/sentinel v0.0.5 h1:EQV7vDmoB4sDxbyAZwnqYE48AOPIdkKZGIuGOMGjBdI=
 github.com/zoobzio/sentinel v0.0.5/go.mod h1:7jMCOCUmZs5gWM7slkzwNxPQE7kCyboSHyGjYQV8wNo=
 golang.org/x/crypto v0.42.0 h1:chiH31gIWm57EkTXpwnqf8qeuMUi0yekh6mT2AvFlqI=

@@ -55,21 +55,21 @@ type Handler[In, Out any] struct {
 }
 
 // Process implements RouteHandler.
-func (h *Handler[In, Out]) Process(ctx context.Context, r *http.Request, w http.ResponseWriter) error {
+func (h *Handler[In, Out]) Process(ctx context.Context, r *http.Request, w http.ResponseWriter) (int, error) {
 	// Emit handler executing event
-	capitan.Emit(ctx, EventHandlerExecuting,
-		KeyHandlerName.Field(h.name),
+	capitan.Emit(ctx, HandlerExecuting,
+		HandlerNameKey.Field(h.name),
 	)
 
 	// Extract and validate parameters.
 	params, err := h.extractParams(ctx, r)
 	if err != nil {
-		capitan.Emit(ctx, EventRequestParamsInvalid,
-			KeyHandlerName.Field(h.name),
-			KeyError.Field(err.Error()),
+		capitan.Emit(ctx, RequestParamsInvalid,
+			HandlerNameKey.Field(h.name),
+			ErrorKey.Field(err.Error()),
 		)
 		writeErrorResponse(w, http.StatusUnprocessableEntity)
-		return err
+		return http.StatusUnprocessableEntity, err
 	}
 
 	// Parse request body.
@@ -83,33 +83,33 @@ func (h *Handler[In, Out]) Process(ctx context.Context, r *http.Request, w http.
 
 		body, readErr := io.ReadAll(bodyReader)
 		if readErr != nil {
-			capitan.Emit(ctx, EventRequestBodyReadError,
-				KeyHandlerName.Field(h.name),
-				KeyError.Field(readErr.Error()),
+			capitan.Emit(ctx, RequestBodyReadError,
+				HandlerNameKey.Field(h.name),
+				ErrorKey.Field(readErr.Error()),
 			)
 			writeErrorResponse(w, http.StatusBadRequest)
-			return readErr
+			return http.StatusBadRequest, readErr
 		}
 		r.Body.Close()
 
 		if len(body) > 0 {
 			if unmarshalErr := json.Unmarshal(body, &input); unmarshalErr != nil {
-				capitan.Emit(ctx, EventRequestBodyParseError,
-					KeyHandlerName.Field(h.name),
-					KeyError.Field(unmarshalErr.Error()),
+				capitan.Emit(ctx, RequestBodyParseError,
+					HandlerNameKey.Field(h.name),
+					ErrorKey.Field(unmarshalErr.Error()),
 				)
 				writeErrorResponse(w, http.StatusUnprocessableEntity)
-				return unmarshalErr
+				return http.StatusUnprocessableEntity, unmarshalErr
 			}
 
 			// Validate input.
 			if inputErr := h.validator.Struct(input); inputErr != nil {
-				capitan.Emit(ctx, EventRequestValidationInputFailed,
-					KeyHandlerName.Field(h.name),
-					KeyError.Field(inputErr.Error()),
+				capitan.Emit(ctx, RequestValidationInputFailed,
+					HandlerNameKey.Field(h.name),
+					ErrorKey.Field(inputErr.Error()),
 				)
 				writeValidationErrorResponse(w, inputErr)
-				return inputErr
+				return http.StatusUnprocessableEntity, inputErr
 			}
 		}
 	}
@@ -132,53 +132,53 @@ func (h *Handler[In, Out]) Process(ctx context.Context, r *http.Request, w http.
 			// Validate that this error code is declared.
 			if !h.isErrorCodeDeclared(status) {
 				// Undeclared sentinel error - programming error.
-				capitan.Emit(ctx, EventHandlerUndeclaredSentinel,
-					KeyHandlerName.Field(h.name),
-					KeyError.Field(err.Error()),
-					KeyStatusCode.Field(status),
+				capitan.Emit(ctx, HandlerUndeclaredSentinel,
+					HandlerNameKey.Field(h.name),
+					ErrorKey.Field(err.Error()),
+					StatusCodeKey.Field(status),
 				)
 				writeErrorResponse(w, http.StatusInternalServerError)
-				return fmt.Errorf("undeclared sentinel error %w (add %d to WithErrorCodes)", err, status)
+				return http.StatusInternalServerError, fmt.Errorf("undeclared sentinel error %w (add %d to WithErrorCodes)", err, status)
 			}
 
 			// Declared sentinel error - successful handling.
-			capitan.Emit(ctx, EventHandlerSentinelError,
-				KeyHandlerName.Field(h.name),
-				KeyError.Field(err.Error()),
-				KeyStatusCode.Field(status),
+			capitan.Emit(ctx, HandlerSentinelError,
+				HandlerNameKey.Field(h.name),
+				ErrorKey.Field(err.Error()),
+				StatusCodeKey.Field(status),
 			)
 			writeErrorResponse(w, status)
-			return nil
+			return status, nil
 		}
 
 		// Real error.
-		capitan.Emit(ctx, EventHandlerError,
-			KeyHandlerName.Field(h.name),
-			KeyError.Field(err.Error()),
+		capitan.Emit(ctx, HandlerError,
+			HandlerNameKey.Field(h.name),
+			ErrorKey.Field(err.Error()),
 		)
 		writeErrorResponse(w, http.StatusInternalServerError)
-		return err
+		return http.StatusInternalServerError, err
 	}
 
 	// Validate output.
 	if validErr := h.validator.Struct(output); validErr != nil {
-		capitan.Emit(ctx, EventRequestValidationOutputFailed,
-			KeyHandlerName.Field(h.name),
-			KeyError.Field(validErr.Error()),
+		capitan.Emit(ctx, RequestValidationOutputFailed,
+			HandlerNameKey.Field(h.name),
+			ErrorKey.Field(validErr.Error()),
 		)
 		writeErrorResponse(w, http.StatusInternalServerError)
-		return fmt.Errorf("output validation failed: %w", validErr)
+		return http.StatusInternalServerError, fmt.Errorf("output validation failed: %w", validErr)
 	}
 
 	// Marshal response.
 	body, err := json.Marshal(output)
 	if err != nil {
-		capitan.Emit(ctx, EventRequestResponseMarshalError,
-			KeyHandlerName.Field(h.name),
-			KeyError.Field(err.Error()),
+		capitan.Emit(ctx, RequestResponseMarshalError,
+			HandlerNameKey.Field(h.name),
+			ErrorKey.Field(err.Error()),
 		)
 		writeErrorResponse(w, http.StatusInternalServerError)
-		return err
+		return http.StatusInternalServerError, err
 	}
 
 	// Write response headers.
@@ -192,12 +192,12 @@ func (h *Handler[In, Out]) Process(ctx context.Context, r *http.Request, w http.
 	w.Write(body)
 
 	// Emit handler success event
-	capitan.Emit(ctx, EventHandlerSuccess,
-		KeyHandlerName.Field(h.name),
-		KeyStatusCode.Field(h.successStatus),
+	capitan.Emit(ctx, HandlerSuccess,
+		HandlerNameKey.Field(h.name),
+		StatusCodeKey.Field(h.successStatus),
 	)
 
-	return nil
+	return h.successStatus, nil
 }
 
 // Name implements RouteHandler.

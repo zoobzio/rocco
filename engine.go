@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/zoobzio/capitan"
@@ -53,9 +54,9 @@ func NewEngine(config *EngineConfig) *Engine {
 	}
 
 	// Emit engine created event
-	capitan.Emit(ctx, EventEngineCreated,
-		KeyHost.Field(config.Host),
-		KeyPort.Field(config.Port),
+	capitan.Emit(ctx, EngineCreated,
+		HostKey.Field(config.Host),
+		PortKey.Field(config.Port),
 	)
 
 	return e
@@ -91,10 +92,10 @@ func (e *Engine) WithHandlers(handlers ...RouteHandler) *Engine {
 		}
 
 		// Emit handler registered event
-		capitan.Emit(e.ctx, EventHandlerRegistered,
-			KeyHandlerName.Field(handler.Name()),
-			KeyMethod.Field(handler.Method()),
-			KeyPath.Field(handler.Path()),
+		capitan.Emit(e.ctx, HandlerRegistered,
+			HandlerNameKey.Field(handler.Name()),
+			MethodKey.Field(handler.Method()),
+			PathKey.Field(handler.Path()),
 		)
 	}
 	return e
@@ -155,30 +156,38 @@ func (e *Engine) registerDefaultHandlers() {
 func (*Engine) adaptHandler(handler RouteHandler) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
+		startTime := time.Now()
 
 		// Emit request received event
-		capitan.Emit(ctx, EventRequestReceived,
-			KeyMethod.Field(r.Method),
-			KeyPath.Field(r.URL.Path),
-			KeyHandlerName.Field(handler.Name()),
+		capitan.Emit(ctx, RequestReceived,
+			MethodKey.Field(r.Method),
+			PathKey.Field(r.URL.Path),
+			HandlerNameKey.Field(handler.Name()),
 		)
 
 		// Handler processes and writes response
-		err := handler.Process(ctx, r, w)
+		status, err := handler.Process(ctx, r, w)
+
+		// Calculate duration
+		durationMs := time.Since(startTime).Milliseconds()
 
 		// Emit request completion event
 		if err != nil {
-			capitan.Emit(ctx, EventRequestFailed,
-				KeyMethod.Field(r.Method),
-				KeyPath.Field(r.URL.Path),
-				KeyHandlerName.Field(handler.Name()),
-				KeyError.Field(err.Error()),
+			capitan.Emit(ctx, RequestFailed,
+				MethodKey.Field(r.Method),
+				PathKey.Field(r.URL.Path),
+				HandlerNameKey.Field(handler.Name()),
+				StatusCodeKey.Field(status),
+				DurationMsKey.Field(durationMs),
+				ErrorKey.Field(err.Error()),
 			)
 		} else {
-			capitan.Emit(ctx, EventRequestCompleted,
-				KeyMethod.Field(r.Method),
-				KeyPath.Field(r.URL.Path),
-				KeyHandlerName.Field(handler.Name()),
+			capitan.Emit(ctx, RequestCompleted,
+				MethodKey.Field(r.Method),
+				PathKey.Field(r.URL.Path),
+				HandlerNameKey.Field(handler.Name()),
+				StatusCodeKey.Field(status),
+				DurationMsKey.Field(durationMs),
 			)
 		}
 	}
@@ -188,10 +197,10 @@ func (*Engine) adaptHandler(handler RouteHandler) http.HandlerFunc {
 // This method blocks until the server is shutdown.
 func (e *Engine) Start() error {
 	// Emit engine starting event
-	capitan.Emit(e.ctx, EventEngineStarting,
-		KeyHost.Field(e.config.Host),
-		KeyPort.Field(e.config.Port),
-		KeyAddress.Field(e.server.Addr),
+	capitan.Emit(e.ctx, EngineStarting,
+		HostKey.Field(e.config.Host),
+		PortKey.Field(e.config.Port),
+		AddressKey.Field(e.server.Addr),
 	)
 
 	err := e.server.ListenAndServe()
@@ -204,7 +213,7 @@ func (e *Engine) Start() error {
 // Shutdown performs a graceful shutdown of the engine.
 func (e *Engine) Shutdown(ctx context.Context) error {
 	// Emit shutdown started event
-	capitan.Emit(ctx, EventEngineShutdownStarted)
+	capitan.Emit(ctx, EngineShutdownStarted)
 
 	// Shutdown HTTP server (waits for active connections to finish)
 	err := e.server.Shutdown(ctx)
@@ -214,13 +223,13 @@ func (e *Engine) Shutdown(ctx context.Context) error {
 
 	// Emit shutdown complete event
 	if err != nil {
-		capitan.Emit(context.Background(), EventEngineShutdownComplete,
-			KeyGraceful.Field(false),
-			KeyError.Field(err.Error()),
+		capitan.Emit(context.Background(), EngineShutdownComplete,
+			GracefulKey.Field(false),
+			ErrorKey.Field(err.Error()),
 		)
 	} else {
-		capitan.Emit(context.Background(), EventEngineShutdownComplete,
-			KeyGraceful.Field(true),
+		capitan.Emit(context.Background(), EngineShutdownComplete,
+			GracefulKey.Field(true),
 		)
 	}
 

@@ -7,8 +7,9 @@ import (
 
 // RouteHandler represents an HTTP route handler with metadata.
 type RouteHandler interface {
-	// Process handles the HTTP request and writes the response
-	Process(ctx context.Context, r *http.Request, w http.ResponseWriter) error
+	// Process handles the HTTP request and writes the response.
+	// Returns the HTTP status code written and any error encountered.
+	Process(ctx context.Context, r *http.Request, w http.ResponseWriter) (int, error)
 
 	// Name returns the handler identifier
 	Name() string
