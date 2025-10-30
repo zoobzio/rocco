@@ -10,6 +10,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/zoobzio/capitan"
+	"github.com/zoobzio/openapi"
 )
 
 type Engine struct {
@@ -54,7 +55,7 @@ func NewEngine(config *EngineConfig) *Engine {
 	}
 
 	// Emit engine created event
-	capitan.Emit(ctx, EngineCreated,
+	capitan.Debug(ctx, EngineCreated,
 		HostKey.Field(config.Host),
 		PortKey.Field(config.Port),
 	)
@@ -92,7 +93,7 @@ func (e *Engine) WithHandlers(handlers ...RouteHandler) *Engine {
 		}
 
 		// Emit handler registered event
-		capitan.Emit(e.ctx, HandlerRegistered,
+		capitan.Debug(e.ctx, HandlerRegistered,
 			HandlerNameKey.Field(handler.Name()),
 			MethodKey.Field(handler.Method()),
 			PathKey.Field(handler.Path()),
@@ -112,7 +113,7 @@ func (e *Engine) ensureDefaultHandlers() {
 func (e *Engine) registerDefaultHandlers() {
 	// OpenAPI spec handler at /openapi
 	e.chiRouter.Get("/openapi", func(w http.ResponseWriter, _ *http.Request) {
-		spec := e.GenerateOpenAPI(Info{
+		spec := e.GenerateOpenAPI(openapi.Info{
 			Title:   "API",
 			Version: "1.0.0",
 		})
@@ -159,7 +160,7 @@ func (*Engine) adaptHandler(handler RouteHandler) http.HandlerFunc {
 		startTime := time.Now()
 
 		// Emit request received event
-		capitan.Emit(ctx, RequestReceived,
+		capitan.Debug(ctx, RequestReceived,
 			MethodKey.Field(r.Method),
 			PathKey.Field(r.URL.Path),
 			HandlerNameKey.Field(handler.Name()),
@@ -173,7 +174,7 @@ func (*Engine) adaptHandler(handler RouteHandler) http.HandlerFunc {
 
 		// Emit request completion event
 		if err != nil {
-			capitan.Emit(ctx, RequestFailed,
+			capitan.Error(ctx, RequestFailed,
 				MethodKey.Field(r.Method),
 				PathKey.Field(r.URL.Path),
 				HandlerNameKey.Field(handler.Name()),
@@ -182,7 +183,7 @@ func (*Engine) adaptHandler(handler RouteHandler) http.HandlerFunc {
 				ErrorKey.Field(err.Error()),
 			)
 		} else {
-			capitan.Emit(ctx, RequestCompleted,
+			capitan.Info(ctx, RequestCompleted,
 				MethodKey.Field(r.Method),
 				PathKey.Field(r.URL.Path),
 				HandlerNameKey.Field(handler.Name()),
@@ -197,7 +198,7 @@ func (*Engine) adaptHandler(handler RouteHandler) http.HandlerFunc {
 // This method blocks until the server is shutdown.
 func (e *Engine) Start() error {
 	// Emit engine starting event
-	capitan.Emit(e.ctx, EngineStarting,
+	capitan.Info(e.ctx, EngineStarting,
 		HostKey.Field(e.config.Host),
 		PortKey.Field(e.config.Port),
 		AddressKey.Field(e.server.Addr),
@@ -213,7 +214,7 @@ func (e *Engine) Start() error {
 // Shutdown performs a graceful shutdown of the engine.
 func (e *Engine) Shutdown(ctx context.Context) error {
 	// Emit shutdown started event
-	capitan.Emit(ctx, EngineShutdownStarted)
+	capitan.Info(ctx, EngineShutdownStarted)
 
 	// Shutdown HTTP server (waits for active connections to finish)
 	err := e.server.Shutdown(ctx)
@@ -223,12 +224,12 @@ func (e *Engine) Shutdown(ctx context.Context) error {
 
 	// Emit shutdown complete event
 	if err != nil {
-		capitan.Emit(context.Background(), EngineShutdownComplete,
+		capitan.Error(context.Background(), EngineShutdownComplete,
 			GracefulKey.Field(false),
 			ErrorKey.Field(err.Error()),
 		)
 	} else {
-		capitan.Emit(context.Background(), EngineShutdownComplete,
+		capitan.Info(context.Background(), EngineShutdownComplete,
 			GracefulKey.Field(true),
 		)
 	}

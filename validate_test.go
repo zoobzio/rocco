@@ -3,6 +3,7 @@ package rocco
 import (
 	"testing"
 
+	"github.com/zoobzio/openapi"
 	"github.com/zoobzio/sentinel"
 )
 
@@ -372,7 +373,7 @@ func TestApplyOpenAPITags_ValidateTag(t *testing.T) {
 		},
 	}
 
-	schema := &Schema{Type: "integer"}
+	schema := &openapi.Schema{Type: "integer"}
 	applyOpenAPITags(schema, field)
 
 	// Check validate-derived constraints
@@ -402,7 +403,7 @@ func TestApplyOpenAPITags_ValidateEmail(t *testing.T) {
 		},
 	}
 
-	schema := &Schema{Type: "string"}
+	schema := &openapi.Schema{Type: "string"}
 	applyOpenAPITags(schema, field)
 
 	if schema.Format != "email" {
@@ -425,7 +426,7 @@ func TestApplyOpenAPITags_ValidateArray(t *testing.T) {
 		},
 	}
 
-	schema := &Schema{Type: "array"}
+	schema := &openapi.Schema{Type: "array"}
 	applyOpenAPITags(schema, field)
 
 	if schema.MinItems == nil || *schema.MinItems != 5 {
@@ -448,7 +449,7 @@ func TestApplyOpenAPITags_ValidateEnum(t *testing.T) {
 		},
 	}
 
-	schema := &Schema{Type: "string"}
+	schema := &openapi.Schema{Type: "string"}
 	applyOpenAPITags(schema, field)
 
 	if schema.Enum == nil {

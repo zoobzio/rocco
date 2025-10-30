@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/zoobzio/openapi"
 	"github.com/zoobzio/sentinel"
 )
 
@@ -271,7 +272,7 @@ func parseValidateTag(validateTag string, goType string) map[string]any {
 }
 
 // applyOpenAPITags extracts OpenAPI tags from field metadata and applies them to the schema
-func applyOpenAPITags(schema *Schema, field sentinel.FieldMetadata) {
+func applyOpenAPITags(schema *openapi.Schema, field sentinel.FieldMetadata) {
 	// First, parse validate tag to extract constraints
 	if validateTag := field.Tags["validate"]; validateTag != "" {
 		constraints := parseValidateTag(validateTag, field.Type)
@@ -336,10 +337,10 @@ func applyOpenAPITags(schema *Schema, field sentinel.FieldMetadata) {
 }
 
 // metadataToSchema converts sentinel ModelMetadata to OpenAPI Schema
-func metadataToSchema(meta sentinel.ModelMetadata) *Schema {
-	schema := &Schema{
+func metadataToSchema(meta sentinel.ModelMetadata) *openapi.Schema {
+	schema := &openapi.Schema{
 		Type:       "object",
-		Properties: make(map[string]*Schema),
+		Properties: make(map[string]*openapi.Schema),
 	}
 
 	var required []string
@@ -401,14 +402,14 @@ func parseJSONTag(field sentinel.FieldMetadata) (name string, required bool) {
 }
 
 // goTypeToSchema converts a Go type string to an OpenAPI Schema
-func goTypeToSchema(goType string) *Schema {
+func goTypeToSchema(goType string) *openapi.Schema {
 	// Handle pointers
 	goType = strings.TrimPrefix(goType, "*")
 
 	// Handle arrays/slices
 	if strings.HasPrefix(goType, "[]") {
 		elementType := strings.TrimPrefix(goType, "[]")
-		return &Schema{
+		return &openapi.Schema{
 			Type:  "array",
 			Items: goTypeToSchema(elementType),
 		}
@@ -416,7 +417,7 @@ func goTypeToSchema(goType string) *Schema {
 
 	// Handle maps
 	if strings.HasPrefix(goType, "map[") {
-		return &Schema{
+		return &openapi.Schema{
 			Type:                 "object",
 			AdditionalProperties: true,
 		}
@@ -425,16 +426,16 @@ func goTypeToSchema(goType string) *Schema {
 	// Basic type mapping
 	switch goType {
 	case "string":
-		return &Schema{Type: "string"}
+		return &openapi.Schema{Type: "string"}
 	case "int", "int8", "int16", "int32", "int64",
 		"uint", "uint8", "uint16", "uint32", "uint64":
-		return &Schema{Type: "integer"}
+		return &openapi.Schema{Type: "integer"}
 	case "float32", "float64":
-		return &Schema{Type: "number"}
+		return &openapi.Schema{Type: "number"}
 	case "bool":
-		return &Schema{Type: "boolean"}
+		return &openapi.Schema{Type: "boolean"}
 	case "time.Time":
-		return &Schema{Type: "string", Format: "date-time"}
+		return &openapi.Schema{Type: "string", Format: "date-time"}
 	default:
 		// Complex type - reference to component schema
 		// Extract just the type name (remove package prefix)
@@ -442,7 +443,7 @@ func goTypeToSchema(goType string) *Schema {
 		if idx := strings.LastIndex(goType, "."); idx != -1 {
 			typeName = goType[idx+1:]
 		}
-		return &Schema{Ref: "#/components/schemas/" + typeName}
+		return &openapi.Schema{Ref: "#/components/schemas/" + typeName}
 	}
 }
 
@@ -477,14 +478,14 @@ func statusCodeToResponseName(code int) string {
 }
 
 // isNoBodySchema checks if a schema represents the NoBody type
-func isNoBodySchema(schema *Schema) bool {
+func isNoBodySchema(schema *openapi.Schema) bool {
 	// NoBody will have TypeName "NoBody" in sentinel metadata
 	// The schema will be an empty object with no properties
 	return schema != nil && schema.Type == "object" && len(schema.Properties) == 0
 }
 
 // setOperationForMethod sets the operation on the correct method field of PathItem
-func setOperationForMethod(pathItem *PathItem, method string, operation *Operation) {
+func setOperationForMethod(pathItem *openapi.PathItem, method string, operation *openapi.Operation) {
 	switch method {
 	case "GET":
 		pathItem.Get = operation
@@ -504,25 +505,25 @@ func setOperationForMethod(pathItem *PathItem, method string, operation *Operati
 }
 
 // GenerateOpenAPI creates an OpenAPI specification from registered handlers
-func (e *Engine) GenerateOpenAPI(info Info) *OpenAPI {
-	spec := &OpenAPI{
+func (e *Engine) GenerateOpenAPI(info openapi.Info) *openapi.OpenAPI {
+	spec := &openapi.OpenAPI{
 		OpenAPI: "3.0.3",
 		Info:    info,
-		Paths:   make(map[string]PathItem),
-		Components: &Components{
-			Schemas:   make(map[string]*Schema),
-			Responses: make(map[string]*Response),
+		Paths:   make(map[string]openapi.PathItem),
+		Components: &openapi.Components{
+			Schemas:   make(map[string]*openapi.Schema),
+			Responses: make(map[string]*openapi.Response),
 		},
 	}
 
 	// Add standard error responses to components
-	spec.Components.Responses["BadRequest"] = &Response{
+	spec.Components.Responses["BadRequest"] = &openapi.Response{
 		Description: "Bad Request",
-		Content: map[string]MediaType{
+		Content: map[string]openapi.MediaType{
 			"application/json": {
-				Schema: &Schema{
+				Schema: &openapi.Schema{
 					Type: "object",
-					Properties: map[string]*Schema{
+					Properties: map[string]*openapi.Schema{
 						"error": {Type: "string"},
 					},
 					Required: []string{"error"},
@@ -530,74 +531,74 @@ func (e *Engine) GenerateOpenAPI(info Info) *OpenAPI {
 			},
 		},
 	}
-	spec.Components.Responses["Unauthorized"] = &Response{
+	spec.Components.Responses["Unauthorized"] = &openapi.Response{
 		Description: "Unauthorized",
-		Content: map[string]MediaType{
+		Content: map[string]openapi.MediaType{
 			"application/json": {
-				Schema: &Schema{Ref: "#/components/schemas/ErrorResponse"},
+				Schema: &openapi.Schema{Ref: "#/components/schemas/ErrorResponse"},
 			},
 		},
 	}
-	spec.Components.Responses["Forbidden"] = &Response{
+	spec.Components.Responses["Forbidden"] = &openapi.Response{
 		Description: "Forbidden",
-		Content: map[string]MediaType{
+		Content: map[string]openapi.MediaType{
 			"application/json": {
-				Schema: &Schema{Ref: "#/components/schemas/ErrorResponse"},
+				Schema: &openapi.Schema{Ref: "#/components/schemas/ErrorResponse"},
 			},
 		},
 	}
-	spec.Components.Responses["NotFound"] = &Response{
+	spec.Components.Responses["NotFound"] = &openapi.Response{
 		Description: "Not Found",
-		Content: map[string]MediaType{
+		Content: map[string]openapi.MediaType{
 			"application/json": {
-				Schema: &Schema{Ref: "#/components/schemas/ErrorResponse"},
+				Schema: &openapi.Schema{Ref: "#/components/schemas/ErrorResponse"},
 			},
 		},
 	}
-	spec.Components.Responses["Conflict"] = &Response{
+	spec.Components.Responses["Conflict"] = &openapi.Response{
 		Description: "Conflict",
-		Content: map[string]MediaType{
+		Content: map[string]openapi.MediaType{
 			"application/json": {
-				Schema: &Schema{Ref: "#/components/schemas/ErrorResponse"},
+				Schema: &openapi.Schema{Ref: "#/components/schemas/ErrorResponse"},
 			},
 		},
 	}
-	spec.Components.Responses["UnprocessableEntity"] = &Response{
+	spec.Components.Responses["UnprocessableEntity"] = &openapi.Response{
 		Description: "Unprocessable Entity",
-		Content: map[string]MediaType{
+		Content: map[string]openapi.MediaType{
 			"application/json": {
-				Schema: &Schema{Ref: "#/components/schemas/ErrorResponse"},
+				Schema: &openapi.Schema{Ref: "#/components/schemas/ErrorResponse"},
 			},
 		},
 	}
-	spec.Components.Responses["TooManyRequests"] = &Response{
+	spec.Components.Responses["TooManyRequests"] = &openapi.Response{
 		Description: "Too Many Requests",
-		Content: map[string]MediaType{
+		Content: map[string]openapi.MediaType{
 			"application/json": {
-				Schema: &Schema{Ref: "#/components/schemas/ErrorResponse"},
+				Schema: &openapi.Schema{Ref: "#/components/schemas/ErrorResponse"},
 			},
 		},
 	}
-	spec.Components.Responses["InternalServerError"] = &Response{
+	spec.Components.Responses["InternalServerError"] = &openapi.Response{
 		Description: "Internal Server Error",
-		Content: map[string]MediaType{
+		Content: map[string]openapi.MediaType{
 			"application/json": {
-				Schema: &Schema{Ref: "#/components/schemas/ErrorResponse"},
+				Schema: &openapi.Schema{Ref: "#/components/schemas/ErrorResponse"},
 			},
 		},
 	}
 
 	// Add ErrorResponse schema
-	spec.Components.Schemas["ErrorResponse"] = &Schema{
+	spec.Components.Schemas["ErrorResponse"] = &openapi.Schema{
 		Type: "object",
-		Properties: map[string]*Schema{
+		Properties: map[string]*openapi.Schema{
 			"error": {Type: "string"},
 		},
 		Required: []string{"error"},
 	}
 
 	// Track unique schemas to add to components
-	schemas := make(map[string]*Schema)
+	schemas := make(map[string]*openapi.Schema)
 	processedTypes := make(map[string]bool) // Prevent infinite recursion
 
 	// Helper to recursively collect schemas for a type and its relationships
@@ -629,35 +630,35 @@ func (e *Engine) GenerateOpenAPI(info Info) *OpenAPI {
 		// Get or create PathItem
 		pathItem, exists := spec.Paths[path]
 		if !exists {
-			pathItem = PathItem{}
+			pathItem = openapi.PathItem{}
 		}
 
 		// Build operation
-		operation := &Operation{
+		operation := &openapi.Operation{
 			OperationID: handler.Name(),
 			Summary:     handler.Summary(),
 			Description: handler.Description(),
 			Tags:        handler.Tags(),
-			Responses:   make(map[string]Response),
+			Responses:   make(map[string]openapi.Response),
 		}
 
 		// Add path parameters
 		for _, paramName := range handler.PathParams() {
-			operation.Parameters = append(operation.Parameters, Parameter{
+			operation.Parameters = append(operation.Parameters, openapi.Parameter{
 				Name:     paramName,
 				In:       "path",
 				Required: true,
-				Schema:   &Schema{Type: "string"},
+				Schema:   &openapi.Schema{Type: "string"},
 			})
 		}
 
 		// Add query parameters
 		for _, paramName := range handler.QueryParams() {
-			operation.Parameters = append(operation.Parameters, Parameter{
+			operation.Parameters = append(operation.Parameters, openapi.Parameter{
 				Name:     paramName,
 				In:       "query",
 				Required: false,
-				Schema:   &Schema{Type: "string"},
+				Schema:   &openapi.Schema{Type: "string"},
 			})
 		}
 
@@ -670,11 +671,11 @@ func (e *Engine) GenerateOpenAPI(info Info) *OpenAPI {
 				collectSchemas(inputMeta)
 			}
 
-			operation.RequestBody = &RequestBody{
+			operation.RequestBody = &openapi.RequestBody{
 				Required: true,
-				Content: map[string]MediaType{
+				Content: map[string]openapi.MediaType{
 					"application/json": {
-						Schema: &Schema{Ref: "#/components/schemas/" + inputSchemaName},
+						Schema: &openapi.Schema{Ref: "#/components/schemas/" + inputSchemaName},
 					},
 				},
 			}
@@ -688,11 +689,11 @@ func (e *Engine) GenerateOpenAPI(info Info) *OpenAPI {
 		}
 
 		successStatus := handler.SuccessStatus()
-		operation.Responses[fmt.Sprintf("%d", successStatus)] = Response{
+		operation.Responses[fmt.Sprintf("%d", successStatus)] = openapi.Response{
 			Description: "Success",
-			Content: map[string]MediaType{
+			Content: map[string]openapi.MediaType{
 				"application/json": {
-					Schema: &Schema{Ref: "#/components/schemas/" + outputSchemaName},
+					Schema: &openapi.Schema{Ref: "#/components/schemas/" + outputSchemaName},
 				},
 			},
 		}
@@ -700,11 +701,11 @@ func (e *Engine) GenerateOpenAPI(info Info) *OpenAPI {
 		// Add error responses
 		for _, errorCode := range handler.ErrorCodes() {
 			responseName := statusCodeToResponseName(errorCode)
-			operation.Responses[fmt.Sprintf("%d", errorCode)] = Response{
+			operation.Responses[fmt.Sprintf("%d", errorCode)] = openapi.Response{
 				Description: responseName,
-				Content: map[string]MediaType{
+				Content: map[string]openapi.MediaType{
 					"application/json": {
-						Schema: &Schema{Ref: "#/components/schemas/ErrorResponse"},
+						Schema: &openapi.Schema{Ref: "#/components/schemas/ErrorResponse"},
 					},
 				},
 			}

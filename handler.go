@@ -11,6 +11,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-playground/validator/v10"
 	"github.com/zoobzio/capitan"
+	"github.com/zoobzio/openapi"
 	"github.com/zoobzio/sentinel"
 )
 
@@ -57,14 +58,14 @@ type Handler[In, Out any] struct {
 // Process implements RouteHandler.
 func (h *Handler[In, Out]) Process(ctx context.Context, r *http.Request, w http.ResponseWriter) (int, error) {
 	// Emit handler executing event
-	capitan.Emit(ctx, HandlerExecuting,
+	capitan.Debug(ctx, HandlerExecuting,
 		HandlerNameKey.Field(h.name),
 	)
 
 	// Extract and validate parameters.
 	params, err := h.extractParams(ctx, r)
 	if err != nil {
-		capitan.Emit(ctx, RequestParamsInvalid,
+		capitan.Error(ctx, RequestParamsInvalid,
 			HandlerNameKey.Field(h.name),
 			ErrorKey.Field(err.Error()),
 		)
@@ -83,7 +84,7 @@ func (h *Handler[In, Out]) Process(ctx context.Context, r *http.Request, w http.
 
 		body, readErr := io.ReadAll(bodyReader)
 		if readErr != nil {
-			capitan.Emit(ctx, RequestBodyReadError,
+			capitan.Error(ctx, RequestBodyReadError,
 				HandlerNameKey.Field(h.name),
 				ErrorKey.Field(readErr.Error()),
 			)
@@ -94,7 +95,7 @@ func (h *Handler[In, Out]) Process(ctx context.Context, r *http.Request, w http.
 
 		if len(body) > 0 {
 			if unmarshalErr := json.Unmarshal(body, &input); unmarshalErr != nil {
-				capitan.Emit(ctx, RequestBodyParseError,
+				capitan.Error(ctx, RequestBodyParseError,
 					HandlerNameKey.Field(h.name),
 					ErrorKey.Field(unmarshalErr.Error()),
 				)
@@ -104,7 +105,7 @@ func (h *Handler[In, Out]) Process(ctx context.Context, r *http.Request, w http.
 
 			// Validate input.
 			if inputErr := h.validator.Struct(input); inputErr != nil {
-				capitan.Emit(ctx, RequestValidationInputFailed,
+				capitan.Warn(ctx, RequestValidationInputFailed,
 					HandlerNameKey.Field(h.name),
 					ErrorKey.Field(inputErr.Error()),
 				)
@@ -132,7 +133,7 @@ func (h *Handler[In, Out]) Process(ctx context.Context, r *http.Request, w http.
 			// Validate that this error code is declared.
 			if !h.isErrorCodeDeclared(status) {
 				// Undeclared sentinel error - programming error.
-				capitan.Emit(ctx, HandlerUndeclaredSentinel,
+				capitan.Warn(ctx, HandlerUndeclaredSentinel,
 					HandlerNameKey.Field(h.name),
 					ErrorKey.Field(err.Error()),
 					StatusCodeKey.Field(status),
@@ -142,7 +143,7 @@ func (h *Handler[In, Out]) Process(ctx context.Context, r *http.Request, w http.
 			}
 
 			// Declared sentinel error - successful handling.
-			capitan.Emit(ctx, HandlerSentinelError,
+			capitan.Warn(ctx, HandlerSentinelError,
 				HandlerNameKey.Field(h.name),
 				ErrorKey.Field(err.Error()),
 				StatusCodeKey.Field(status),
@@ -152,7 +153,7 @@ func (h *Handler[In, Out]) Process(ctx context.Context, r *http.Request, w http.
 		}
 
 		// Real error.
-		capitan.Emit(ctx, HandlerError,
+		capitan.Error(ctx, HandlerError,
 			HandlerNameKey.Field(h.name),
 			ErrorKey.Field(err.Error()),
 		)
@@ -162,7 +163,7 @@ func (h *Handler[In, Out]) Process(ctx context.Context, r *http.Request, w http.
 
 	// Validate output.
 	if validErr := h.validator.Struct(output); validErr != nil {
-		capitan.Emit(ctx, RequestValidationOutputFailed,
+		capitan.Warn(ctx, RequestValidationOutputFailed,
 			HandlerNameKey.Field(h.name),
 			ErrorKey.Field(validErr.Error()),
 		)
@@ -173,7 +174,7 @@ func (h *Handler[In, Out]) Process(ctx context.Context, r *http.Request, w http.
 	// Marshal response.
 	body, err := json.Marshal(output)
 	if err != nil {
-		capitan.Emit(ctx, RequestResponseMarshalError,
+		capitan.Error(ctx, RequestResponseMarshalError,
 			HandlerNameKey.Field(h.name),
 			ErrorKey.Field(err.Error()),
 		)
@@ -192,7 +193,7 @@ func (h *Handler[In, Out]) Process(ctx context.Context, r *http.Request, w http.
 	w.Write(body)
 
 	// Emit handler success event
-	capitan.Emit(ctx, HandlerSuccess,
+	capitan.Info(ctx, HandlerSuccess,
 		HandlerNameKey.Field(h.name),
 		StatusCodeKey.Field(h.successStatus),
 	)
@@ -256,12 +257,12 @@ func (h *Handler[In, Out]) ErrorCodes() []int {
 }
 
 // InputSchema implements RouteHandler.
-func (h *Handler[In, Out]) InputSchema() *Schema {
+func (h *Handler[In, Out]) InputSchema() *openapi.Schema {
 	return metadataToSchema(h.InputMeta)
 }
 
 // OutputSchema implements RouteHandler.
-func (h *Handler[In, Out]) OutputSchema() *Schema {
+func (h *Handler[In, Out]) OutputSchema() *openapi.Schema {
 	return metadataToSchema(h.OutputMeta)
 }
 

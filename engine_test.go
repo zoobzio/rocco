@@ -8,6 +8,8 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"github.com/zoobzio/openapi"
 )
 
 func TestNewEngine(t *testing.T) {
@@ -155,7 +157,7 @@ func TestEngine_RegisterOpenAPIHandler(t *testing.T) {
 		t.Errorf("expected content-type 'application/json', got %q", w.Header().Get("Content-Type"))
 	}
 
-	var spec OpenAPI
+	var spec openapi.OpenAPI
 	err := json.Unmarshal(w.Body.Bytes(), &spec)
 	if err != nil {
 		t.Fatalf("failed to parse OpenAPI spec: %v", err)

@@ -3,6 +3,8 @@ package rocco
 import (
 	"context"
 	"net/http"
+
+	"github.com/zoobzio/openapi"
 )
 
 // RouteHandler represents an HTTP route handler with metadata.
@@ -31,10 +33,10 @@ type RouteHandler interface {
 	QueryParams() []string
 	SuccessStatus() int
 	ErrorCodes() []int
-	InputSchema() *Schema   // Returns OpenAPI schema for request body
-	OutputSchema() *Schema  // Returns OpenAPI schema for response body
-	InputTypeName() string  // Returns the Go type name for request body
-	OutputTypeName() string // Returns the Go type name for response body
+	InputSchema() *openapi.Schema  // Returns OpenAPI schema for request body
+	OutputSchema() *openapi.Schema // Returns OpenAPI schema for response body
+	InputTypeName() string         // Returns the Go type name for request body
+	OutputTypeName() string        // Returns the Go type name for response body
 
 	// Lifecycle
 	Close() error

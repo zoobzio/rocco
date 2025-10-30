@@ -3,6 +3,7 @@ package rocco
 import (
 	"testing"
 
+	"github.com/zoobzio/openapi"
 	"github.com/zoobzio/sentinel"
 )
 
@@ -183,7 +184,7 @@ func TestStatusCodeToResponseName(t *testing.T) {
 func TestIsNoBodySchema(t *testing.T) {
 	tests := []struct {
 		name   string
-		schema *Schema
+		schema *openapi.Schema
 		want   bool
 	}{
 		{
@@ -193,19 +194,19 @@ func TestIsNoBodySchema(t *testing.T) {
 		},
 		{
 			"empty object",
-			&Schema{Type: "object", Properties: map[string]*Schema{}},
+			&openapi.Schema{Type: "object", Properties: map[string]*openapi.Schema{}},
 			true,
 		},
 		{
 			"object with properties",
-			&Schema{Type: "object", Properties: map[string]*Schema{
+			&openapi.Schema{Type: "object", Properties: map[string]*openapi.Schema{
 				"field": {Type: "string"},
 			}},
 			false,
 		},
 		{
 			"non-object",
-			&Schema{Type: "string"},
+			&openapi.Schema{Type: "string"},
 			false,
 		},
 	}
@@ -223,21 +224,21 @@ func TestIsNoBodySchema(t *testing.T) {
 func TestSetOperationForMethod(t *testing.T) {
 	tests := []struct {
 		method string
-		check  func(*PathItem) bool
+		check  func(*openapi.PathItem) bool
 	}{
-		{"GET", func(pi *PathItem) bool { return pi.Get != nil }},
-		{"POST", func(pi *PathItem) bool { return pi.Post != nil }},
-		{"PUT", func(pi *PathItem) bool { return pi.Put != nil }},
-		{"DELETE", func(pi *PathItem) bool { return pi.Delete != nil }},
-		{"PATCH", func(pi *PathItem) bool { return pi.Patch != nil }},
-		{"OPTIONS", func(pi *PathItem) bool { return pi.Options != nil }},
-		{"HEAD", func(pi *PathItem) bool { return pi.Head != nil }},
+		{"GET", func(pi *openapi.PathItem) bool { return pi.Get != nil }},
+		{"POST", func(pi *openapi.PathItem) bool { return pi.Post != nil }},
+		{"PUT", func(pi *openapi.PathItem) bool { return pi.Put != nil }},
+		{"DELETE", func(pi *openapi.PathItem) bool { return pi.Delete != nil }},
+		{"PATCH", func(pi *openapi.PathItem) bool { return pi.Patch != nil }},
+		{"OPTIONS", func(pi *openapi.PathItem) bool { return pi.Options != nil }},
+		{"HEAD", func(pi *openapi.PathItem) bool { return pi.Head != nil }},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.method, func(t *testing.T) {
-			pathItem := &PathItem{}
-			operation := &Operation{OperationID: "test"}
+			pathItem := &openapi.PathItem{}
+			operation := &openapi.Operation{OperationID: "test"}
 
 			setOperationForMethod(pathItem, tt.method, operation)
 
@@ -273,7 +274,7 @@ func TestGenerateOpenAPI(t *testing.T) {
 	engine.WithHandlers(handler1, handler2)
 
 	// Generate OpenAPI spec
-	info := Info{
+	info := openapi.Info{
 		Title:       "Test API",
 		Version:     "1.0.0",
 		Description: "Test API description",
@@ -361,7 +362,7 @@ func TestGenerateOpenAPI_PathParams(t *testing.T) {
 
 	engine.WithHandlers(handler)
 
-	spec := engine.GenerateOpenAPI(Info{Title: "Test", Version: "1.0.0"})
+	spec := engine.GenerateOpenAPI(openapi.Info{Title: "Test", Version: "1.0.0"})
 
 	pathItem := spec.Paths["/users/{id}"]
 	if pathItem.Get == nil {
@@ -397,7 +398,7 @@ func TestGenerateOpenAPI_QueryParams(t *testing.T) {
 
 	engine.WithHandlers(handler)
 
-	spec := engine.GenerateOpenAPI(Info{Title: "Test", Version: "1.0.0"})
+	spec := engine.GenerateOpenAPI(openapi.Info{Title: "Test", Version: "1.0.0"})
 
 	pathItem := spec.Paths["/users"]
 	if pathItem.Get == nil {
@@ -432,7 +433,7 @@ func TestApplyOpenAPITags_Description(t *testing.T) {
 		},
 	}
 
-	schema := &Schema{Type: "string"}
+	schema := &openapi.Schema{Type: "string"}
 	applyOpenAPITags(schema, field)
 
 	if schema.Description != "User's full name" {
@@ -449,7 +450,7 @@ func TestApplyOpenAPITags_Format(t *testing.T) {
 		},
 	}
 
-	schema := &Schema{Type: "string"}
+	schema := &openapi.Schema{Type: "string"}
 	applyOpenAPITags(schema, field)
 
 	if schema.Format != "email" {
@@ -481,7 +482,7 @@ func TestApplyOpenAPITags_Example(t *testing.T) {
 				},
 			}
 
-			schema := &Schema{Type: tt.schemaType}
+			schema := &openapi.Schema{Type: tt.schemaType}
 			applyOpenAPITags(schema, field)
 
 			if schema.Example == nil {
@@ -539,7 +540,7 @@ func TestApplyOpenAPITags_Enum(t *testing.T) {
 				},
 			}
 
-			schema := &Schema{Type: tt.schemaType}
+			schema := &openapi.Schema{Type: tt.schemaType}
 			applyOpenAPITags(schema, field)
 
 			if len(schema.Enum) != tt.wantLen {
@@ -558,7 +559,7 @@ func TestApplyOpenAPITags_NumericValidations(t *testing.T) {
 		},
 	}
 
-	schema := &Schema{Type: "integer"}
+	schema := &openapi.Schema{Type: "integer"}
 	applyOpenAPITags(schema, field)
 
 	if schema.Minimum == nil || *schema.Minimum != 0 {
@@ -579,7 +580,7 @@ func TestApplyOpenAPITags_StringValidations(t *testing.T) {
 		},
 	}
 
-	schema := &Schema{Type: "string"}
+	schema := &openapi.Schema{Type: "string"}
 	applyOpenAPITags(schema, field)
 
 	if schema.MinLength == nil || *schema.MinLength != 3 {
@@ -599,7 +600,7 @@ func TestApplyOpenAPITags_ArrayValidations(t *testing.T) {
 		},
 	}
 
-	schema := &Schema{Type: "array"}
+	schema := &openapi.Schema{Type: "array"}
 	applyOpenAPITags(schema, field)
 
 	if schema.MinItems == nil || *schema.MinItems != 5 {
@@ -630,7 +631,7 @@ func TestApplyOpenAPITags_MultipleTagsCombined(t *testing.T) {
 		},
 	}
 
-	schema := &Schema{Type: "string"}
+	schema := &openapi.Schema{Type: "string"}
 	applyOpenAPITags(schema, field)
 
 	if schema.Description != "User email address" {
@@ -864,7 +865,7 @@ func TestParseValidateTag_GteLte(t *testing.T) {
 		},
 	}
 
-	schema := &Schema{Type: "integer"}
+	schema := &openapi.Schema{Type: "integer"}
 	applyOpenAPITags(schema, field)
 
 	if schema.Minimum == nil || *schema.Minimum != 0 {
@@ -884,7 +885,7 @@ func TestParseValidateTag_GtLt(t *testing.T) {
 		},
 	}
 
-	schema := &Schema{Type: "number"}
+	schema := &openapi.Schema{Type: "number"}
 	applyOpenAPITags(schema, field)
 
 	if schema.Minimum == nil || *schema.Minimum != 0 {
@@ -910,7 +911,7 @@ func TestParseValidateTag_StringLen(t *testing.T) {
 		},
 	}
 
-	schema := &Schema{Type: "string"}
+	schema := &openapi.Schema{Type: "string"}
 	applyOpenAPITags(schema, field)
 
 	if schema.MinLength == nil || *schema.MinLength != 5 {
@@ -930,7 +931,7 @@ func TestParseValidateTag_URLFormat(t *testing.T) {
 		},
 	}
 
-	schema := &Schema{Type: "string"}
+	schema := &openapi.Schema{Type: "string"}
 	applyOpenAPITags(schema, field)
 
 	if schema.Format != "uri" {
@@ -951,7 +952,7 @@ func TestParseValidateTag_UUIDFormats(t *testing.T) {
 				},
 			}
 
-			schema := &Schema{Type: "string"}
+			schema := &openapi.Schema{Type: "string"}
 			applyOpenAPITags(schema, field)
 
 			if schema.Format != "uuid" {
@@ -980,7 +981,7 @@ func TestParseValidateTag_IPFormats(t *testing.T) {
 				},
 			}
 
-			schema := &Schema{Type: "string"}
+			schema := &openapi.Schema{Type: "string"}
 			applyOpenAPITags(schema, field)
 
 			if schema.Format != tt.format {
@@ -999,7 +1000,7 @@ func TestParseValidateTag_DateTime(t *testing.T) {
 		},
 	}
 
-	schema := &Schema{Type: "string"}
+	schema := &openapi.Schema{Type: "string"}
 	applyOpenAPITags(schema, field)
 
 	if schema.Format != "date-time" {

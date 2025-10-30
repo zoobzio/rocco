@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/zoobzio/openapi"
 )
 
 // Mock implementation of RouteHandler for testing
@@ -29,21 +31,21 @@ func (m *mockHandler) Process(ctx context.Context, r *http.Request, w http.Respo
 	return http.StatusOK, nil
 }
 
-func (m *mockHandler) Name() string          { return m.name }
-func (m *mockHandler) Method() string        { return m.method }
-func (m *mockHandler) Path() string          { return m.path }
-func (m *mockHandler) Summary() string       { return m.summary }
-func (m *mockHandler) Description() string   { return m.description }
-func (m *mockHandler) Tags() []string        { return m.tags }
-func (m *mockHandler) PathParams() []string  { return m.pathParams }
-func (m *mockHandler) QueryParams() []string { return m.queryParams }
-func (m *mockHandler) SuccessStatus() int    { return m.successCode }
-func (m *mockHandler) ErrorCodes() []int     { return m.errorCodes }
-func (*mockHandler) InputSchema() *Schema    { return &Schema{Type: "object"} }
-func (*mockHandler) OutputSchema() *Schema   { return &Schema{Type: "object"} }
-func (*mockHandler) InputTypeName() string   { return "MockInput" }
-func (*mockHandler) OutputTypeName() string  { return "MockOutput" }
-func (*mockHandler) Close() error            { return nil }
+func (m *mockHandler) Name() string                { return m.name }
+func (m *mockHandler) Method() string              { return m.method }
+func (m *mockHandler) Path() string                { return m.path }
+func (m *mockHandler) Summary() string             { return m.summary }
+func (m *mockHandler) Description() string         { return m.description }
+func (m *mockHandler) Tags() []string              { return m.tags }
+func (m *mockHandler) PathParams() []string        { return m.pathParams }
+func (m *mockHandler) QueryParams() []string       { return m.queryParams }
+func (m *mockHandler) SuccessStatus() int          { return m.successCode }
+func (m *mockHandler) ErrorCodes() []int           { return m.errorCodes }
+func (*mockHandler) InputSchema() *openapi.Schema  { return &openapi.Schema{Type: "object"} }
+func (*mockHandler) OutputSchema() *openapi.Schema { return &openapi.Schema{Type: "object"} }
+func (*mockHandler) InputTypeName() string         { return "MockInput" }
+func (*mockHandler) OutputTypeName() string        { return "MockOutput" }
+func (*mockHandler) Close() error                  { return nil }
 func (*mockHandler) Middleware() []func(http.Handler) http.Handler {
 	return nil
 }
