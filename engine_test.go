@@ -41,6 +41,20 @@ func TestNewEngine_NilConfig(t *testing.T) {
 	}
 }
 
+func TestEngine_Router(t *testing.T) {
+	engine := NewEngine(nil)
+
+	router := engine.Router()
+	if router == nil {
+		t.Fatal("expected chi.Router, got nil")
+	}
+
+	// Verify it's the same instance
+	if router != engine.chiRouter {
+		t.Error("Router() returned different instance than internal chiRouter")
+	}
+}
+
 func TestEngine_Use(t *testing.T) {
 	engine := NewEngine(nil)
 

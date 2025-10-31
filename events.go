@@ -3,91 +3,91 @@ package rocco
 import "github.com/zoobzio/capitan"
 
 // Engine lifecycle signals.
-const (
+var (
 	// EngineCreated is emitted when an Engine instance is created.
 	// Fields: HostKey, PortKey.
-	EngineCreated capitan.Signal = "http.engine.created"
+	EngineCreated = capitan.NewSignal("http.engine.created", "HTTP engine instance created with configured host and port")
 
 	// EngineStarting is emitted when the server starts listening for requests.
 	// Fields: HostKey, PortKey, AddressKey.
-	EngineStarting capitan.Signal = "http.engine.starting"
+	EngineStarting = capitan.NewSignal("http.engine.starting", "HTTP server starting to listen for requests on configured address")
 
 	// EngineShutdownStarted is emitted when graceful shutdown is initiated.
 	// Fields: none.
-	EngineShutdownStarted capitan.Signal = "http.engine.shutdown.started"
+	EngineShutdownStarted = capitan.NewSignal("http.engine.shutdown.started", "HTTP engine graceful shutdown initiated")
 
 	// EngineShutdownComplete is emitted when shutdown finishes.
 	// Fields: GracefulKey, ErrorKey (if failed).
-	EngineShutdownComplete capitan.Signal = "http.engine.shutdown.complete"
+	EngineShutdownComplete = capitan.NewSignal("http.engine.shutdown.complete", "HTTP engine shutdown completed, graceful or with error")
 )
 
 // Handler registration signals.
-const (
+var (
 	// HandlerRegistered is emitted when a handler is registered with the engine.
 	// Fields: HandlerNameKey, MethodKey, PathKey.
-	HandlerRegistered capitan.Signal = "http.handler.registered"
+	HandlerRegistered = capitan.NewSignal("http.handler.registered", "HTTP handler registered with engine for specific route")
 )
 
 // Request lifecycle signals.
-const (
+var (
 	// RequestReceived is emitted when a request is received.
 	// Fields: MethodKey, PathKey, HandlerNameKey.
-	RequestReceived capitan.Signal = "http.request.received"
+	RequestReceived = capitan.NewSignal("http.request.received", "HTTP request received by engine and routed to handler")
 
 	// RequestCompleted is emitted when a request completes successfully.
 	// Fields: MethodKey, PathKey, HandlerNameKey, StatusCodeKey, DurationMsKey.
-	RequestCompleted capitan.Signal = "http.request.completed"
+	RequestCompleted = capitan.NewSignal("http.request.completed", "HTTP request completed successfully with response sent")
 
 	// RequestFailed is emitted when a request fails with an error.
 	// Fields: MethodKey, PathKey, HandlerNameKey, StatusCodeKey, DurationMsKey, ErrorKey.
-	RequestFailed capitan.Signal = "http.request.failed"
+	RequestFailed = capitan.NewSignal("http.request.failed", "HTTP request failed during processing with error")
 )
 
 // Handler processing signals.
-const (
+var (
 	// HandlerExecuting is emitted when handler execution begins.
 	// Fields: HandlerNameKey.
-	HandlerExecuting capitan.Signal = "http.handler.executing"
+	HandlerExecuting = capitan.NewSignal("http.handler.executing", "Handler execution started for incoming request")
 
 	// HandlerSuccess is emitted when a handler returns successfully.
 	// Fields: HandlerNameKey, StatusCodeKey.
-	HandlerSuccess capitan.Signal = "http.handler.success"
+	HandlerSuccess = capitan.NewSignal("http.handler.success", "Handler completed successfully and returned response")
 
 	// HandlerError is emitted when a handler returns an error.
 	// Fields: HandlerNameKey, ErrorKey.
-	HandlerError capitan.Signal = "http.handler.error"
+	HandlerError = capitan.NewSignal("http.handler.error", "Handler returned unexpected error during execution")
 
 	// HandlerSentinelError is emitted when a declared sentinel error is returned.
 	// Fields: HandlerNameKey, ErrorKey, StatusCodeKey.
-	HandlerSentinelError capitan.Signal = "http.handler.sentinel.error"
+	HandlerSentinelError = capitan.NewSignal("http.handler.sentinel.error", "Handler returned declared sentinel error mapped to HTTP status")
 
 	// HandlerUndeclaredSentinel is emitted when an undeclared sentinel error is returned (programming error).
 	// Fields: HandlerNameKey, ErrorKey, StatusCodeKey.
-	HandlerUndeclaredSentinel capitan.Signal = "http.handler.sentinel.undeclared"
+	HandlerUndeclaredSentinel = capitan.NewSignal("http.handler.sentinel.undeclared", "Handler returned undeclared sentinel error, programming error detected")
 
 	// RequestParamsInvalid is emitted when path or query parameter extraction fails.
 	// Fields: HandlerNameKey, ErrorKey.
-	RequestParamsInvalid capitan.Signal = "http.request.params.invalid"
+	RequestParamsInvalid = capitan.NewSignal("http.request.params.invalid", "Request path or query parameter extraction failed")
 
 	// RequestBodyReadError is emitted when reading the request body fails.
 	// Fields: HandlerNameKey, ErrorKey.
-	RequestBodyReadError capitan.Signal = "http.request.body.read.error"
+	RequestBodyReadError = capitan.NewSignal("http.request.body.read.error", "Failed to read request body from HTTP stream")
 
 	// RequestBodyParseError is emitted when parsing the JSON request body fails.
 	// Fields: HandlerNameKey, ErrorKey.
-	RequestBodyParseError capitan.Signal = "http.request.body.parse.error"
+	RequestBodyParseError = capitan.NewSignal("http.request.body.parse.error", "Failed to parse JSON request body")
 
 	// RequestValidationInputFailed is emitted when input validation fails.
 	// Fields: HandlerNameKey, ErrorKey.
-	RequestValidationInputFailed capitan.Signal = "http.request.validation.input.failed"
+	RequestValidationInputFailed = capitan.NewSignal("http.request.validation.input.failed", "Request input validation failed against defined rules")
 
 	// RequestValidationOutputFailed is emitted when output validation fails.
 	// Fields: HandlerNameKey, ErrorKey.
-	RequestValidationOutputFailed capitan.Signal = "http.request.validation.output.failed"
+	RequestValidationOutputFailed = capitan.NewSignal("http.request.validation.output.failed", "Response output validation failed, internal error")
 
 	// RequestResponseMarshalError is emitted when marshaling the response fails.
 	// Fields: HandlerNameKey, ErrorKey.
-	RequestResponseMarshalError capitan.Signal = "http.request.response.marshal.error"
+	RequestResponseMarshalError = capitan.NewSignal("http.request.response.marshal.error", "Failed to marshal response to JSON")
 )
 
 // Event field keys (primitive types only).

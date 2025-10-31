@@ -18,8 +18,8 @@ github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZb
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
 github.com/stretchr/testify v1.8.4 h1:CcVxjf3Q8PM0mHUKJCdn+eZZtm5yQwehR5yeSVQQcUk=
 github.com/stretchr/testify v1.8.4/go.mod h1:sz/lmYIOXD/1dqDmKjjqLyZ2RngseejIcXlSw2iwfAo=
-github.com/zoobzio/capitan v0.0.5 h1:WIcaCLFmUzK+BVRREmotnompHcpxOPnedUzBOkQRpX8=
-github.com/zoobzio/capitan v0.0.5/go.mod h1:/OwNDIB1CHxwSzsF4e48B2+2e/IMIvTb0ZMgVeNyYig=
+github.com/zoobzio/capitan v0.0.8 h1:mSsJv+4+D3Fl4KgQ7xU3SdagHWXV1m/J+BLGcnFc33c=
+github.com/zoobzio/capitan v0.0.8/go.mod h1:/OwNDIB1CHxwSzsF4e48B2+2e/IMIvTb0ZMgVeNyYig=
 github.com/zoobzio/openapi v0.0.2 h1:dH2mT1lpNV4D2tbNiRWVIqafO8TU1J0HNkTIUGc5Boo=
 github.com/zoobzio/openapi v0.0.2/go.mod h1:DFKLNIJO25VWcDdx7i12Zu5wKoFSAOCDufyMrhgl8BQ=
 github.com/zoobzio/sentinel v0.0.6 h1:K6xqs/qelsjC5wGthPzw3cRWjGi0p1mwhh5oSJQT6Ko=

@@ -71,6 +71,12 @@ func (e *Engine) WithMiddleware(middleware ...func(http.Handler) http.Handler) *
 	return e
 }
 
+// Router returns the underlying chi.Router for advanced use cases.
+// This allows power users to register custom routes that won't appear in OpenAPI documentation.
+func (e *Engine) Router() chi.Router {
+	return e.chiRouter
+}
+
 // WithHandlers adds one or more RouteHandlers to the engine and returns the engine for chaining.
 func (e *Engine) WithHandlers(handlers ...RouteHandler) *Engine {
 	// Ensure default handlers are registered first (only once)
