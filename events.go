@@ -90,6 +90,39 @@ var (
 	RequestResponseMarshalError = capitan.NewSignal("http.request.response.marshal.error", "Failed to marshal response to JSON")
 )
 
+// Authentication signals.
+var (
+	// AuthenticationFailed is emitted when authentication extraction fails.
+	// Fields: MethodKey, PathKey, HandlerNameKey, ErrorKey.
+	AuthenticationFailed = capitan.NewSignal("http.auth.failed", "Authentication extraction failed for request")
+
+	// AuthenticationSucceeded is emitted when authentication succeeds.
+	// Fields: MethodKey, PathKey, HandlerNameKey, IdentityIDKey, TenantIDKey.
+	AuthenticationSucceeded = capitan.NewSignal("http.auth.succeeded", "Authentication succeeded for request")
+)
+
+// Authorization signals.
+var (
+	// AuthorizationScopeDenied is emitted when scope requirement is not met.
+	// Fields: MethodKey, PathKey, HandlerNameKey, IdentityIDKey, RequiredScopesKey, UserScopesKey.
+	AuthorizationScopeDenied = capitan.NewSignal("http.authz.scope.denied", "Authorization failed due to insufficient scopes")
+
+	// AuthorizationRoleDenied is emitted when role requirement is not met.
+	// Fields: MethodKey, PathKey, HandlerNameKey, IdentityIDKey, RequiredRolesKey, UserRolesKey.
+	AuthorizationRoleDenied = capitan.NewSignal("http.authz.role.denied", "Authorization failed due to insufficient roles")
+
+	// AuthorizationSucceeded is emitted when authorization checks pass.
+	// Fields: MethodKey, PathKey, HandlerNameKey, IdentityIDKey.
+	AuthorizationSucceeded = capitan.NewSignal("http.authz.succeeded", "Authorization checks passed for request")
+)
+
+// Rate limiting signals.
+var (
+	// RateLimitExceeded is emitted when usage limit threshold is exceeded.
+	// Fields: MethodKey, PathKey, HandlerNameKey, IdentityIDKey, LimitKeyKey, CurrentValueKey, ThresholdKey.
+	RateLimitExceeded = capitan.NewSignal("http.ratelimit.exceeded", "Usage limit threshold exceeded for request")
+)
+
 // Event field keys (primitive types only).
 var (
 	// Engine fields.
@@ -105,4 +138,17 @@ var (
 	DurationMsKey  = capitan.NewInt64Key("duration_ms")
 	ErrorKey       = capitan.NewStringKey("error")
 	GracefulKey    = capitan.NewBoolKey("graceful")
+
+	// Authentication/Authorization fields.
+	IdentityIDKey     = capitan.NewStringKey("identity_id")
+	TenantIDKey       = capitan.NewStringKey("tenant_id")
+	RequiredScopesKey = capitan.NewStringKey("required_scopes")
+	UserScopesKey     = capitan.NewStringKey("user_scopes")
+	RequiredRolesKey  = capitan.NewStringKey("required_roles")
+	UserRolesKey      = capitan.NewStringKey("user_roles")
+
+	// Rate limiting fields.
+	LimitKeyKey     = capitan.NewStringKey("limit_key")
+	CurrentValueKey = capitan.NewIntKey("current_value")
+	ThresholdKey    = capitan.NewIntKey("threshold")
 )

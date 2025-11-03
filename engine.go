@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -142,15 +143,29 @@ func (e *Engine) WithHandlers(handlers ...RouteHandler) *Engine {
 func (e *Engine) buildAuthMiddleware() func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ctx := r.Context()
+
 			// Extract identity
-			identity, err := e.extractIdentity(r.Context(), r)
+			identity, err := e.extractIdentity(ctx, r)
 			if err != nil {
+				capitan.Warn(ctx, AuthenticationFailed,
+					MethodKey.Field(r.Method),
+					PathKey.Field(r.URL.Path),
+					ErrorKey.Field(err.Error()),
+				)
 				writeErrorResponse(w, http.StatusUnauthorized)
 				return
 			}
 
 			// Store identity in context
-			ctx := context.WithValue(r.Context(), identityContextKey, identity)
+			ctx = context.WithValue(ctx, identityContextKey, identity)
+
+			capitan.Debug(ctx, AuthenticationSucceeded,
+				MethodKey.Field(r.Method),
+				PathKey.Field(r.URL.Path),
+				IdentityIDKey.Field(identity.ID()),
+				TenantIDKey.Field(identity.TenantID()),
+			)
 
 			// Continue with enriched context
 			next.ServeHTTP(w, r.WithContext(ctx))
@@ -171,8 +186,10 @@ func (*Engine) buildAuthorizationMiddleware(handler RouteHandler) func(http.Hand
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ctx := r.Context()
+
 			// Extract identity from context (should exist from auth middleware)
-			val := r.Context().Value(identityContextKey)
+			val := ctx.Value(identityContextKey)
 			if val == nil {
 				writeErrorResponse(w, http.StatusForbidden)
 				return
@@ -195,6 +212,12 @@ func (*Engine) buildAuthorizationMiddleware(handler RouteHandler) func(http.Hand
 				}
 				if !hasAnyScope {
 					// Missing required scope group
+					capitan.Warn(ctx, AuthorizationScopeDenied,
+						MethodKey.Field(r.Method),
+						PathKey.Field(r.URL.Path),
+						IdentityIDKey.Field(identity.ID()),
+						RequiredScopesKey.Field(strings.Join(scopeGroup, ",")),
+					)
 					writeErrorResponse(w, http.StatusForbidden)
 					return
 				}
@@ -211,12 +234,23 @@ func (*Engine) buildAuthorizationMiddleware(handler RouteHandler) func(http.Hand
 				}
 				if !hasAnyRole {
 					// Missing required role group
+					capitan.Warn(ctx, AuthorizationRoleDenied,
+						MethodKey.Field(r.Method),
+						PathKey.Field(r.URL.Path),
+						IdentityIDKey.Field(identity.ID()),
+						RequiredRolesKey.Field(strings.Join(roleGroup, ",")),
+					)
 					writeErrorResponse(w, http.StatusForbidden)
 					return
 				}
 			}
 
 			// All checks passed
+			capitan.Debug(ctx, AuthorizationSucceeded,
+				MethodKey.Field(r.Method),
+				PathKey.Field(r.URL.Path),
+				IdentityIDKey.Field(identity.ID()),
+			)
 			next.ServeHTTP(w, r)
 		})
 	}
@@ -228,8 +262,10 @@ func (*Engine) buildUsageLimitMiddleware(handler RouteHandler) func(http.Handler
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ctx := r.Context()
+
 			// Extract identity from context (should exist from auth middleware)
-			val := r.Context().Value(identityContextKey)
+			val := ctx.Value(identityContextKey)
 			if val == nil {
 				writeErrorResponse(w, http.StatusForbidden)
 				return
@@ -250,8 +286,17 @@ func (*Engine) buildUsageLimitMiddleware(handler RouteHandler) func(http.Handler
 			// Check each usage limit
 			for _, limit := range usageLimits {
 				threshold := limit.ThresholdFunc(identity)
-				if stats[limit.Key] >= threshold {
+				currentValue := stats[limit.Key]
+				if currentValue >= threshold {
 					// Usage limit exceeded
+					capitan.Warn(ctx, RateLimitExceeded,
+						MethodKey.Field(r.Method),
+						PathKey.Field(r.URL.Path),
+						IdentityIDKey.Field(identity.ID()),
+						LimitKeyKey.Field(limit.Key),
+						CurrentValueKey.Field(currentValue),
+						ThresholdKey.Field(threshold),
+					)
 					writeErrorResponse(w, http.StatusTooManyRequests)
 					return
 				}
