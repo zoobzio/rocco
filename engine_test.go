@@ -12,15 +12,22 @@ import (
 	"github.com/zoobzio/openapi"
 )
 
+// newTestEngine creates an engine for testing without authentication.
+func newTestEngine() *Engine {
+	return NewEngine("localhost", 8080, nil)
+}
+
 func TestNewEngine(t *testing.T) {
-	config := DefaultConfig()
-	engine := NewEngine(config)
+	engine := NewEngine("localhost", 8080, nil)
 
 	if engine == nil {
 		t.Fatal("expected engine, got nil")
 	}
-	if engine.config != config {
-		t.Error("engine config not set correctly")
+	if engine.config.Host != "localhost" {
+		t.Errorf("expected host 'localhost', got %s", engine.config.Host)
+	}
+	if engine.config.Port != 8080 {
+		t.Errorf("expected port 8080, got %d", engine.config.Port)
 	}
 	if engine.server == nil {
 		t.Error("HTTP server not initialized")
@@ -31,7 +38,7 @@ func TestNewEngine(t *testing.T) {
 }
 
 func TestNewEngine_NilConfig(t *testing.T) {
-	engine := NewEngine(nil)
+	engine := newTestEngine()
 
 	if engine == nil {
 		t.Fatal("expected engine, got nil")
@@ -42,7 +49,7 @@ func TestNewEngine_NilConfig(t *testing.T) {
 }
 
 func TestEngine_Router(t *testing.T) {
-	engine := NewEngine(nil)
+	engine := newTestEngine()
 
 	router := engine.Router()
 	if router == nil {
@@ -56,7 +63,7 @@ func TestEngine_Router(t *testing.T) {
 }
 
 func TestEngine_Use(t *testing.T) {
-	engine := NewEngine(nil)
+	engine := newTestEngine()
 
 	middlewareCalled := false
 	middleware := func(next http.Handler) http.Handler {
@@ -90,7 +97,7 @@ func TestEngine_Use(t *testing.T) {
 }
 
 func TestEngine_Register(t *testing.T) {
-	engine := NewEngine(nil)
+	engine := newTestEngine()
 
 	handler := NewHandler[NoBody, testOutput](
 		"test",
@@ -118,7 +125,7 @@ func TestEngine_Register(t *testing.T) {
 }
 
 func TestEngine_RegisterMultiple(t *testing.T) {
-	engine := NewEngine(nil)
+	engine := newTestEngine()
 
 	handler1 := NewHandler[NoBody, testOutput](
 		"test1",
@@ -146,7 +153,7 @@ func TestEngine_RegisterMultiple(t *testing.T) {
 }
 
 func TestEngine_RegisterOpenAPIHandler(t *testing.T) {
-	engine := NewEngine(nil)
+	engine := newTestEngine()
 
 	// Register a test handler first
 	handler := NewHandler[NoBody, testOutput](
@@ -185,8 +192,7 @@ func TestEngine_RegisterOpenAPIHandler(t *testing.T) {
 }
 
 func TestEngine_Shutdown(t *testing.T) {
-	config := DefaultConfig().WithPort(0) // Use random port
-	engine := NewEngine(config)
+	engine := NewEngine("localhost", 0, nil) // Use random port
 
 	// Start server in background
 	serverErr := make(chan error, 1)
@@ -219,7 +225,7 @@ func TestEngine_Shutdown(t *testing.T) {
 }
 
 func TestEngine_Register_HandlerMiddleware(t *testing.T) {
-	engine := NewEngine(nil)
+	engine := newTestEngine()
 
 	var middlewareCalled bool
 	middleware := func(next http.Handler) http.Handler {
@@ -258,7 +264,7 @@ func TestEngine_Register_HandlerMiddleware(t *testing.T) {
 }
 
 func TestEngine_Register_HandlerMiddlewareOrder(t *testing.T) {
-	engine := NewEngine(nil)
+	engine := newTestEngine()
 
 	var callOrder []string
 
@@ -301,7 +307,7 @@ func TestEngine_Register_HandlerMiddlewareOrder(t *testing.T) {
 }
 
 func TestEngine_Register_HandlerAndEngineMiddleware(t *testing.T) {
-	engine := NewEngine(nil)
+	engine := newTestEngine()
 
 	var callOrder []string
 
@@ -348,7 +354,7 @@ func TestEngine_Register_HandlerAndEngineMiddleware(t *testing.T) {
 }
 
 func TestEngine_Register_NoHandlerMiddleware(t *testing.T) {
-	engine := NewEngine(nil)
+	engine := newTestEngine()
 
 	handler := NewHandler[NoBody, testOutput](
 		"test",
@@ -372,7 +378,7 @@ func TestEngine_Register_NoHandlerMiddleware(t *testing.T) {
 }
 
 func TestEngine_AdaptHandler_ErrorPath(t *testing.T) {
-	engine := NewEngine(nil)
+	engine := newTestEngine()
 
 	// Handler that returns an error (using errors.New to trigger the real error path)
 	errorHandler := NewHandler[NoBody, testOutput](

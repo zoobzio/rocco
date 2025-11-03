@@ -516,6 +516,25 @@ func (e *Engine) GenerateOpenAPI(info openapi.Info) *openapi.OpenAPI {
 		},
 	}
 
+	// Check if any handlers require authentication
+	hasAuth := false
+	for _, handler := range e.handlers {
+		if handler.RequiresAuth() {
+			hasAuth = true
+			break
+		}
+	}
+
+	// Add bearer token security scheme if any handler requires auth
+	if hasAuth {
+		spec.Components.SecuritySchemes = make(map[string]*openapi.SecurityScheme)
+		spec.Components.SecuritySchemes["bearerAuth"] = &openapi.SecurityScheme{
+			Type:        "http",
+			Scheme:      "bearer",
+			Description: "Bearer token authentication",
+		}
+	}
+
 	// Add standard error responses to components
 	spec.Components.Responses["BadRequest"] = &openapi.Response{
 		Description: "Bad Request",
@@ -708,6 +727,41 @@ func (e *Engine) GenerateOpenAPI(info openapi.Info) *openapi.OpenAPI {
 						Schema: &openapi.Schema{Ref: "#/components/schemas/ErrorResponse"},
 					},
 				},
+			}
+		}
+
+		// Add security requirements if handler requires authentication
+		if handler.RequiresAuth() {
+			// Collect all required scopes (flattened from all groups)
+			var allScopes []string
+			for _, scopeGroup := range handler.ScopeGroups() {
+				allScopes = append(allScopes, scopeGroup...)
+			}
+
+			operation.Security = append(operation.Security, openapi.SecurityRequirement{
+				"bearerAuth": allScopes, // Scopes for OAuth2/bearer tokens
+			})
+
+			// Add 401 Unauthorized error response
+			operation.Responses["401"] = openapi.Response{
+				Description: "Unauthorized",
+				Content: map[string]openapi.MediaType{
+					"application/json": {
+						Schema: &openapi.Schema{Ref: "#/components/schemas/ErrorResponse"},
+					},
+				},
+			}
+
+			// Add 403 Forbidden error response if handler has scope/role requirements
+			if len(handler.ScopeGroups()) > 0 || len(handler.RoleGroups()) > 0 {
+				operation.Responses["403"] = openapi.Response{
+					Description: "Forbidden - insufficient permissions",
+					Content: map[string]openapi.MediaType{
+						"application/json": {
+							Schema: &openapi.Schema{Ref: "#/components/schemas/ErrorResponse"},
+						},
+					},
+				}
 			}
 		}
 

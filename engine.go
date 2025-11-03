@@ -19,16 +19,26 @@ type Engine struct {
 	chiRouter           chi.Router
 	middleware          []func(http.Handler) http.Handler
 	handlers            []RouteHandler // Registered handlers for OpenAPI generation
+	extractIdentity     func(context.Context, *http.Request) (Identity, error)
 	ctx                 context.Context
 	cancel              context.CancelFunc
 	defaultHandlersOnce sync.Once
 }
 
-// NewEngine creates a new Engine with the given configuration.
-// If config is nil, uses DefaultConfig.
-func NewEngine(config *EngineConfig) *Engine {
-	if config == nil {
-		config = DefaultConfig()
+// NewEngine creates a new Engine with identity extraction.
+// The extractIdentity function is called for handlers that require authentication.
+// Pass nil for extractIdentity if you don't need authentication.
+func NewEngine(
+	host string,
+	port int,
+	extractIdentity func(context.Context, *http.Request) (Identity, error),
+) *Engine {
+	config := &EngineConfig{
+		Host:         host,
+		Port:         port,
+		ReadTimeout:  120 * time.Second,
+		WriteTimeout: 120 * time.Second,
+		IdleTimeout:  120 * time.Second,
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -37,11 +47,12 @@ func NewEngine(config *EngineConfig) *Engine {
 	r := chi.NewRouter()
 
 	e := &Engine{
-		config:     config,
-		chiRouter:  r,
-		middleware: make([]func(http.Handler) http.Handler, 0),
-		ctx:        ctx,
-		cancel:     cancel,
+		config:          config,
+		chiRouter:       r,
+		middleware:      make([]func(http.Handler) http.Handler, 0),
+		extractIdentity: extractIdentity,
+		ctx:             ctx,
+		cancel:          cancel,
 	}
 
 	// Create HTTP server
@@ -89,8 +100,27 @@ func (e *Engine) WithHandlers(handlers ...RouteHandler) *Engine {
 		// Adapt our handler to http.HandlerFunc.
 		httpHandler := e.adaptHandler(handler)
 
-		// Apply handler-specific middleware if available.
+		// Build middleware stack: handler middleware + auth middleware (if handler requires it)
 		middleware := handler.Middleware()
+
+		// Add authentication middleware if handler requires it
+		if handler.RequiresAuth() && e.extractIdentity != nil {
+			authMiddleware := e.buildAuthMiddleware()
+			middleware = append(middleware, authMiddleware)
+
+			// Add authorization middleware if handler has scope/role requirements
+			if len(handler.ScopeGroups()) > 0 || len(handler.RoleGroups()) > 0 {
+				authzMiddleware := e.buildAuthorizationMiddleware(handler)
+				middleware = append(middleware, authzMiddleware)
+			}
+
+			// Add usage limit middleware if handler has usage limits
+			if len(handler.UsageLimits()) > 0 {
+				usageLimitMiddleware := e.buildUsageLimitMiddleware(handler)
+				middleware = append(middleware, usageLimitMiddleware)
+			}
+		}
+
 		if len(middleware) > 0 {
 			e.chiRouter.With(middleware...).Method(handler.Method(), handler.Path(), httpHandler)
 		} else {
@@ -106,6 +136,131 @@ func (e *Engine) WithHandlers(handlers ...RouteHandler) *Engine {
 		)
 	}
 	return e
+}
+
+// buildAuthMiddleware creates authentication middleware using the extractIdentity callback.
+func (e *Engine) buildAuthMiddleware() func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Extract identity
+			identity, err := e.extractIdentity(r.Context(), r)
+			if err != nil {
+				writeErrorResponse(w, http.StatusUnauthorized)
+				return
+			}
+
+			// Store identity in context
+			ctx := context.WithValue(r.Context(), identityContextKey, identity)
+
+			// Continue with enriched context
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}
+}
+
+// identityContextKey is the context key for storing Identity.
+type contextKey string
+
+const identityContextKey contextKey = "rocco_identity"
+
+// buildAuthorizationMiddleware creates middleware that checks scope and role requirements.
+// Scope/role groups use OR within each group, AND across groups.
+func (*Engine) buildAuthorizationMiddleware(handler RouteHandler) func(http.Handler) http.Handler {
+	scopeGroups := handler.ScopeGroups()
+	roleGroups := handler.RoleGroups()
+
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Extract identity from context (should exist from auth middleware)
+			val := r.Context().Value(identityContextKey)
+			if val == nil {
+				writeErrorResponse(w, http.StatusForbidden)
+				return
+			}
+
+			identity, ok := val.(Identity)
+			if !ok {
+				writeErrorResponse(w, http.StatusForbidden)
+				return
+			}
+
+			// Check scope requirements (AND across groups, OR within group)
+			for _, scopeGroup := range scopeGroups {
+				hasAnyScope := false
+				for _, scope := range scopeGroup {
+					if identity.HasScope(scope) {
+						hasAnyScope = true
+						break
+					}
+				}
+				if !hasAnyScope {
+					// Missing required scope group
+					writeErrorResponse(w, http.StatusForbidden)
+					return
+				}
+			}
+
+			// Check role requirements (AND across groups, OR within group)
+			for _, roleGroup := range roleGroups {
+				hasAnyRole := false
+				for _, role := range roleGroup {
+					if identity.HasRole(role) {
+						hasAnyRole = true
+						break
+					}
+				}
+				if !hasAnyRole {
+					// Missing required role group
+					writeErrorResponse(w, http.StatusForbidden)
+					return
+				}
+			}
+
+			// All checks passed
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// buildUsageLimitMiddleware creates middleware that checks usage limits from identity stats.
+func (*Engine) buildUsageLimitMiddleware(handler RouteHandler) func(http.Handler) http.Handler {
+	usageLimits := handler.UsageLimits()
+
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Extract identity from context (should exist from auth middleware)
+			val := r.Context().Value(identityContextKey)
+			if val == nil {
+				writeErrorResponse(w, http.StatusForbidden)
+				return
+			}
+
+			identity, ok := val.(Identity)
+			if !ok {
+				writeErrorResponse(w, http.StatusForbidden)
+				return
+			}
+
+			// Get identity stats
+			stats := identity.Stats()
+			if stats == nil {
+				stats = make(map[string]int)
+			}
+
+			// Check each usage limit
+			for _, limit := range usageLimits {
+				threshold := limit.ThresholdFunc(identity)
+				if stats[limit.Key] >= threshold {
+					// Usage limit exceeded
+					writeErrorResponse(w, http.StatusTooManyRequests)
+					return
+				}
+			}
+
+			// All checks passed
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 // ensureDefaultHandlers sets up OpenAPI spec and docs handlers at /openapi and /docs (once).

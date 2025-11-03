@@ -66,12 +66,8 @@ func handleUser(req *rocco.Request[rocco.NoBody]) (UserResponse, error) {
 }
 
 func main() {
-	// Create engine configuration
-	config := rocco.DefaultConfig().
-		WithPort(8081)
-
-	// Create and configure engine
-	engine := rocco.NewEngine(config)
+	// Create and configure engine (no authentication for this example)
+	engine := rocco.NewEngine("localhost", 8081, nil)
 
 	// Register handlers
 	helloHandler := rocco.NewHandler[HelloRequest, HelloResponse](

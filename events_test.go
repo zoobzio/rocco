@@ -41,8 +41,7 @@ func TestEvents_EngineCreated(t *testing.T) {
 	})
 	defer listener.Close()
 
-	config := DefaultConfig().WithHost("localhost").WithPort(9000)
-	_ = NewEngine(config)
+	_ = NewEngine("localhost", 9000, nil)
 
 	if !received {
 		t.Error("EngineCreated not emitted")
@@ -69,7 +68,7 @@ func TestEvents_HandlerRegistered(t *testing.T) {
 	})
 	defer listener.Close()
 
-	engine := NewEngine(nil)
+	engine := newTestEngine()
 	handler := NewHandler[NoBody, testOutput](
 		"test-handler",
 		"GET",
@@ -116,7 +115,7 @@ func TestEvents_RequestLifecycle_Success(t *testing.T) {
 	})
 	defer listener2.Close()
 
-	engine := NewEngine(nil)
+	engine := newTestEngine()
 	handler := NewHandler[NoBody, testOutput](
 		"test-handler",
 		"GET",
@@ -160,7 +159,7 @@ func TestEvents_RequestLifecycle_Failed(t *testing.T) {
 	})
 	defer listener.Close()
 
-	engine := NewEngine(nil)
+	engine := newTestEngine()
 	handler := NewHandler[NoBody, testOutput](
 		"failing-handler",
 		"GET",
@@ -195,7 +194,7 @@ func TestEvents_HandlerExecuting(t *testing.T) {
 	})
 	defer listener.Close()
 
-	engine := NewEngine(nil)
+	engine := newTestEngine()
 	handler := NewHandler[NoBody, testOutput](
 		"exec-handler",
 		"GET",
@@ -230,7 +229,7 @@ func TestEvents_HandlerSuccess(t *testing.T) {
 	})
 	defer listener.Close()
 
-	engine := NewEngine(nil)
+	engine := newTestEngine()
 	handler := NewHandler[NoBody, testOutput](
 		"success-handler",
 		"POST",
@@ -265,7 +264,7 @@ func TestEvents_HandlerError(t *testing.T) {
 	})
 	defer listener.Close()
 
-	engine := NewEngine(nil)
+	engine := newTestEngine()
 	handler := NewHandler[NoBody, testOutput](
 		"error-handler",
 		"GET",
@@ -302,7 +301,7 @@ func TestEvents_HandlerSentinelError(t *testing.T) {
 	})
 	defer listener.Close()
 
-	engine := NewEngine(nil)
+	engine := newTestEngine()
 	handler := NewHandler[NoBody, testOutput](
 		"sentinel-handler",
 		"GET",
@@ -340,7 +339,7 @@ func TestEvents_HandlerUndeclaredSentinel(t *testing.T) {
 	})
 	defer listener.Close()
 
-	engine := NewEngine(nil)
+	engine := newTestEngine()
 	handler := NewHandler[NoBody, testOutput](
 		"undeclared-handler",
 		"GET",
@@ -375,7 +374,7 @@ func TestEvents_RequestBodyParseError(t *testing.T) {
 	})
 	defer listener.Close()
 
-	engine := NewEngine(nil)
+	engine := newTestEngine()
 	handler := NewHandler[testInput, testOutput](
 		"parse-handler",
 		"POST",
@@ -415,7 +414,7 @@ func TestEvents_RequestValidationInputFailed(t *testing.T) {
 		Email string `json:"email" validate:"required,email"`
 	}
 
-	engine := NewEngine(nil)
+	engine := newTestEngine()
 	handler := NewHandler[validatedInput, testOutput](
 		"validation-handler",
 		"POST",
@@ -456,7 +455,7 @@ func TestEvents_RequestValidationOutputFailed(t *testing.T) {
 		Email string `json:"email" validate:"required,email"`
 	}
 
-	engine := NewEngine(nil)
+	engine := newTestEngine()
 	handler := NewHandler[NoBody, validatedOutput](
 		"output-validation-handler",
 		"GET",
@@ -497,8 +496,7 @@ func TestEvents_EngineShutdown(t *testing.T) {
 	})
 	defer listener2.Close()
 
-	config := DefaultConfig().WithPort(0) // Random port
-	engine := NewEngine(config)
+	engine := NewEngine("localhost", 0, nil) // Random port
 
 	// Start server in background
 	go func() {

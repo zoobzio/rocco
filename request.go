@@ -17,6 +17,7 @@ type Request[In any] struct {
 	*http.Request   // Embedded for direct access when needed (use sparingly)
 	Params          *Params
 	Body            In
+	Identity        Identity // Authenticated identity (nil/NoIdentity for public endpoints)
 }
 
 // Params holds extracted request parameters.

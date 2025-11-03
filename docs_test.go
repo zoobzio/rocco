@@ -250,7 +250,7 @@ func TestSetOperationForMethod(t *testing.T) {
 }
 
 func TestGenerateOpenAPI(t *testing.T) {
-	engine := NewEngine(nil)
+	engine := newTestEngine()
 
 	// Register test handlers
 	handler1 := NewHandler[NoBody, testOutput](
@@ -349,7 +349,7 @@ func TestGenerateOpenAPI(t *testing.T) {
 }
 
 func TestGenerateOpenAPI_PathParams(t *testing.T) {
-	engine := NewEngine(nil)
+	engine := newTestEngine()
 
 	handler := NewHandler[NoBody, testOutput](
 		"get-user",
@@ -385,7 +385,7 @@ func TestGenerateOpenAPI_PathParams(t *testing.T) {
 }
 
 func TestGenerateOpenAPI_QueryParams(t *testing.T) {
-	engine := NewEngine(nil)
+	engine := newTestEngine()
 
 	handler := NewHandler[NoBody, testOutput](
 		"list-users",

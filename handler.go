@@ -15,6 +15,12 @@ import (
 	"github.com/zoobzio/sentinel"
 )
 
+// UsageLimit represents a usage limit check with a dynamic threshold callback.
+type UsageLimit struct {
+	Key           string             // Stats key to check (e.g., "requests_today")
+	ThresholdFunc func(Identity) int // Function that returns threshold for this identity
+}
+
 // Handler wraps a typed handler function with metadata for documentation and parsing.
 // It implements RouteHandler interface.
 // The handler function receives a Request with typed input and parameters.
@@ -53,6 +59,16 @@ type Handler[In, Out any] struct {
 
 	// Middleware.
 	middleware []func(http.Handler) http.Handler
+
+	// Authentication.
+	requiresAuth bool
+
+	// Authorization - scopes and roles (OR within group, AND across groups).
+	scopeGroups [][]string // e.g., [["read", "write"], ["admin"]] = (read OR write) AND admin
+	roleGroups  [][]string // e.g., [["admin", "moderator"], ["verified"]] = (admin OR moderator) AND verified
+
+	// Usage limits - rate limiting based on identity stats.
+	usageLimits []UsageLimit
 }
 
 // Process implements RouteHandler.
@@ -115,12 +131,21 @@ func (h *Handler[In, Out]) Process(ctx context.Context, r *http.Request, w http.
 		}
 	}
 
+	// Extract identity from context if present
+	var identity Identity = NoIdentity{}
+	if val := ctx.Value(identityContextKey); val != nil {
+		if id, ok := val.(Identity); ok {
+			identity = id
+		}
+	}
+
 	// Create Request for callback.
 	req := &Request[In]{
-		Context: ctx,
-		Request: r,
-		Params:  params,
-		Body:    input,
+		Context:  ctx,
+		Request:  r,
+		Params:   params,
+		Body:     input,
+		Identity: identity,
 	}
 
 	// Call user handler.
@@ -361,6 +386,70 @@ func (h *Handler[In, Out]) WithMiddleware(middleware ...func(http.Handler) http.
 // Middleware returns the handler's middleware stack.
 func (h *Handler[In, Out]) Middleware() []func(http.Handler) http.Handler {
 	return h.middleware
+}
+
+// RequiresAuth returns whether this handler requires authentication.
+func (h *Handler[In, Out]) RequiresAuth() bool {
+	return h.requiresAuth
+}
+
+// WithAuthentication marks this handler as requiring authentication.
+func (h *Handler[In, Out]) WithAuthentication() *Handler[In, Out] {
+	h.requiresAuth = true
+	return h
+}
+
+// WithScopes adds a scope requirement group (OR logic within group, AND across multiple calls).
+// Example: .WithScopes("read", "write") requires (read OR write).
+// Calling multiple times creates AND: .WithScopes("read").WithScopes("admin") = read AND admin.
+func (h *Handler[In, Out]) WithScopes(scopes ...string) *Handler[In, Out] {
+	if len(scopes) > 0 {
+		h.scopeGroups = append(h.scopeGroups, scopes)
+		// Scopes require authentication
+		h.requiresAuth = true
+	}
+	return h
+}
+
+// WithRoles adds a role requirement group (OR logic within group, AND across multiple calls).
+// Example: .WithRoles("admin", "moderator") requires (admin OR moderator).
+// Calling multiple times creates AND: .WithRoles("admin").WithRoles("verified") = admin AND verified.
+func (h *Handler[In, Out]) WithRoles(roles ...string) *Handler[In, Out] {
+	if len(roles) > 0 {
+		h.roleGroups = append(h.roleGroups, roles)
+		// Roles require authentication
+		h.requiresAuth = true
+	}
+	return h
+}
+
+// ScopeGroups returns the scope requirement groups.
+func (h *Handler[In, Out]) ScopeGroups() [][]string {
+	return h.scopeGroups
+}
+
+// RoleGroups returns the role requirement groups.
+func (h *Handler[In, Out]) RoleGroups() [][]string {
+	return h.roleGroups
+}
+
+// WithUsageLimit adds a usage limit check based on identity stats.
+// The handler will return 429 Too Many Requests if identity.Stats()[key] >= thresholdFunc(identity).
+// The thresholdFunc is called with the identity to allow dynamic limits per user/tenant.
+// Usage limits require authentication.
+func (h *Handler[In, Out]) WithUsageLimit(key string, thresholdFunc func(Identity) int) *Handler[In, Out] {
+	h.usageLimits = append(h.usageLimits, UsageLimit{
+		Key:           key,
+		ThresholdFunc: thresholdFunc,
+	})
+	// Usage limits require authentication
+	h.requiresAuth = true
+	return h
+}
+
+// UsageLimits returns the usage limit configuration.
+func (h *Handler[In, Out]) UsageLimits() []UsageLimit {
+	return h.usageLimits
 }
 
 // extractParams extracts and validates required parameters from the request.

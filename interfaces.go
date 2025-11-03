@@ -23,6 +23,16 @@ type RouteHandler interface {
 	// Middleware
 	Middleware() []func(http.Handler) http.Handler
 
+	// Authentication
+	RequiresAuth() bool // Returns true if this handler requires authentication
+
+	// Authorization
+	ScopeGroups() [][]string // Returns scope requirement groups (OR within, AND across)
+	RoleGroups() [][]string  // Returns role requirement groups (OR within, AND across)
+
+	// Rate limiting
+	UsageLimits() []UsageLimit // Returns usage limit configuration
+
 	// Optional metadata for documentation
 	Summary() string
 	Description() string
