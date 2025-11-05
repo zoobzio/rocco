@@ -5,23 +5,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-
-	"github.com/zoobzio/openapi"
 )
 
-// Mock implementation of RouteHandler for testing
+// Mock implementation of Endpoint for testing
 type mockHandler struct {
 	processFunc func(ctx context.Context, r *http.Request, w http.ResponseWriter) (int, error)
-	name        string
-	method      string
-	path        string
-	summary     string
-	description string
-	tags        []string
-	pathParams  []string
-	queryParams []string
-	successCode int
-	errorCodes  []int
+	spec        HandlerSpec
 }
 
 func (m *mockHandler) Process(ctx context.Context, r *http.Request, w http.ResponseWriter) (int, error) {
@@ -31,79 +20,75 @@ func (m *mockHandler) Process(ctx context.Context, r *http.Request, w http.Respo
 	return http.StatusOK, nil
 }
 
-func (m *mockHandler) Name() string                { return m.name }
-func (m *mockHandler) Method() string              { return m.method }
-func (m *mockHandler) Path() string                { return m.path }
-func (m *mockHandler) Summary() string             { return m.summary }
-func (m *mockHandler) Description() string         { return m.description }
-func (m *mockHandler) Tags() []string              { return m.tags }
-func (m *mockHandler) PathParams() []string        { return m.pathParams }
-func (m *mockHandler) QueryParams() []string       { return m.queryParams }
-func (m *mockHandler) SuccessStatus() int          { return m.successCode }
-func (m *mockHandler) ErrorCodes() []int           { return m.errorCodes }
-func (*mockHandler) InputSchema() *openapi.Schema  { return &openapi.Schema{Type: "object"} }
-func (*mockHandler) OutputSchema() *openapi.Schema { return &openapi.Schema{Type: "object"} }
-func (*mockHandler) InputTypeName() string         { return "MockInput" }
-func (*mockHandler) OutputTypeName() string        { return "MockOutput" }
-func (*mockHandler) Close() error                  { return nil }
+func (m *mockHandler) Spec() HandlerSpec {
+	return m.spec
+}
+
+func (*mockHandler) Close() error { return nil }
+
 func (*mockHandler) Middleware() []func(http.Handler) http.Handler {
 	return nil
 }
 
-func TestRouteHandler_Interface(t *testing.T) {
+func TestEndpoint_Interface(t *testing.T) {
 	handler := &mockHandler{
-		name:        "test-handler",
-		method:      "GET",
-		path:        "/test",
-		summary:     "Test handler",
-		description: "A test handler",
-		tags:        []string{"test"},
-		pathParams:  []string{"id"},
-		queryParams: []string{"page"},
-		successCode: 200,
-		errorCodes:  []int{404, 500},
+		spec: HandlerSpec{
+			Name:           "test-handler",
+			Method:         "GET",
+			Path:           "/test",
+			Summary:        "Test handler",
+			Description:    "A test handler",
+			Tags:           []string{"test"},
+			PathParams:     []string{"id"},
+			QueryParams:    []string{"page"},
+			InputTypeName:  "MockInput",
+			OutputTypeName: "MockOutput",
+			SuccessStatus:  200,
+			ErrorCodes:     []int{404, 500},
+		},
 	}
 
-	// Test all interface methods
-	if handler.Name() != "test-handler" {
-		t.Errorf("expected name 'test-handler', got %q", handler.Name())
+	// Test spec method
+	spec := handler.Spec()
+	if spec.Name != "test-handler" {
+		t.Errorf("expected name 'test-handler', got %q", spec.Name)
 	}
-	if handler.Method() != "GET" {
-		t.Errorf("expected method 'GET', got %q", handler.Method())
+	if spec.Method != "GET" {
+		t.Errorf("expected method 'GET', got %q", spec.Method)
 	}
-	if handler.Path() != "/test" {
-		t.Errorf("expected path '/test', got %q", handler.Path())
+	if spec.Path != "/test" {
+		t.Errorf("expected path '/test', got %q", spec.Path)
 	}
-	if handler.Summary() != "Test handler" {
-		t.Errorf("expected summary 'Test handler', got %q", handler.Summary())
+	if spec.Summary != "Test handler" {
+		t.Errorf("expected summary 'Test handler', got %q", spec.Summary)
 	}
-	if handler.Description() != "A test handler" {
-		t.Errorf("expected description 'A test handler', got %q", handler.Description())
+	if spec.Description != "A test handler" {
+		t.Errorf("expected description 'A test handler', got %q", spec.Description)
 	}
-	if len(handler.Tags()) != 1 || handler.Tags()[0] != "test" {
-		t.Errorf("expected tags ['test'], got %v", handler.Tags())
+	if len(spec.Tags) != 1 || spec.Tags[0] != "test" {
+		t.Errorf("expected tags ['test'], got %v", spec.Tags)
 	}
-	if len(handler.PathParams()) != 1 || handler.PathParams()[0] != "id" {
-		t.Errorf("expected path params ['id'], got %v", handler.PathParams())
+	if len(spec.PathParams) != 1 || spec.PathParams[0] != "id" {
+		t.Errorf("expected path params ['id'], got %v", spec.PathParams)
 	}
-	if len(handler.QueryParams()) != 1 || handler.QueryParams()[0] != "page" {
-		t.Errorf("expected query params ['page'], got %v", handler.QueryParams())
+	if len(spec.QueryParams) != 1 || spec.QueryParams[0] != "page" {
+		t.Errorf("expected query params ['page'], got %v", spec.QueryParams)
 	}
-	if handler.SuccessStatus() != 200 {
-		t.Errorf("expected success status 200, got %d", handler.SuccessStatus())
+	if spec.SuccessStatus != 200 {
+		t.Errorf("expected success status 200, got %d", spec.SuccessStatus)
 	}
-	if len(handler.ErrorCodes()) != 2 {
-		t.Errorf("expected 2 error codes, got %d", len(handler.ErrorCodes()))
+	if len(spec.ErrorCodes) != 2 {
+		t.Errorf("expected 2 error codes, got %d", len(spec.ErrorCodes))
 	}
-	if handler.InputTypeName() != "MockInput" {
-		t.Errorf("expected input type 'MockInput', got %q", handler.InputTypeName())
+	if spec.InputTypeName != "MockInput" {
+		t.Errorf("expected input type 'MockInput', got %q", spec.InputTypeName)
 	}
-	if handler.OutputTypeName() != "MockOutput" {
-		t.Errorf("expected output type 'MockOutput', got %q", handler.OutputTypeName())
+	if spec.OutputTypeName != "MockOutput" {
+		t.Errorf("expected output type 'MockOutput', got %q", spec.OutputTypeName)
 	}
 }
 
-func TestRouteHandler_Process(t *testing.T) {
+func TestEndpoint_Process(t *testing.T) {
 	called := false
 	handler := &mockHandler{
 		processFunc: func(_ context.Context, _ *http.Request, w http.ResponseWriter) (int, error) {
@@ -136,7 +121,7 @@ func TestRouteHandler_Process(t *testing.T) {
 	}
 }
 
-func TestRouteHandler_Close(t *testing.T) {
+func TestEndpoint_Close(t *testing.T) {
 	handler := &mockHandler{}
 
 	err := handler.Close()

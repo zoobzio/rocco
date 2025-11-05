@@ -181,46 +181,6 @@ func TestStatusCodeToResponseName(t *testing.T) {
 	}
 }
 
-func TestIsNoBodySchema(t *testing.T) {
-	tests := []struct {
-		name   string
-		schema *openapi.Schema
-		want   bool
-	}{
-		{
-			"nil schema",
-			nil,
-			false,
-		},
-		{
-			"empty object",
-			&openapi.Schema{Type: "object", Properties: map[string]*openapi.Schema{}},
-			true,
-		},
-		{
-			"object with properties",
-			&openapi.Schema{Type: "object", Properties: map[string]*openapi.Schema{
-				"field": {Type: "string"},
-			}},
-			false,
-		},
-		{
-			"non-object",
-			&openapi.Schema{Type: "string"},
-			false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := isNoBodySchema(tt.schema)
-			if result != tt.want {
-				t.Errorf("expected %v, got %v", tt.want, result)
-			}
-		})
-	}
-}
-
 func TestSetOperationForMethod(t *testing.T) {
 	tests := []struct {
 		method string
@@ -273,13 +233,15 @@ func TestGenerateOpenAPI(t *testing.T) {
 
 	engine.WithHandlers(handler1, handler2)
 
-	// Generate OpenAPI spec
-	info := openapi.Info{
+	// Set OpenAPI info
+	engine.WithOpenAPIInfo(openapi.Info{
 		Title:       "Test API",
 		Version:     "1.0.0",
 		Description: "Test API description",
-	}
-	spec := engine.GenerateOpenAPI(info)
+	})
+
+	// Generate OpenAPI spec
+	spec := engine.GenerateOpenAPI(nil)
 
 	// Check spec structure
 	if spec.OpenAPI != "3.0.3" {
@@ -362,7 +324,8 @@ func TestGenerateOpenAPI_PathParams(t *testing.T) {
 
 	engine.WithHandlers(handler)
 
-	spec := engine.GenerateOpenAPI(openapi.Info{Title: "Test", Version: "1.0.0"})
+	engine.WithOpenAPIInfo(openapi.Info{Title: "Test", Version: "1.0.0"})
+	spec := engine.GenerateOpenAPI(nil)
 
 	pathItem := spec.Paths["/users/{id}"]
 	if pathItem.Get == nil {
@@ -398,7 +361,8 @@ func TestGenerateOpenAPI_QueryParams(t *testing.T) {
 
 	engine.WithHandlers(handler)
 
-	spec := engine.GenerateOpenAPI(openapi.Info{Title: "Test", Version: "1.0.0"})
+	engine.WithOpenAPIInfo(openapi.Info{Title: "Test", Version: "1.0.0"})
+	spec := engine.GenerateOpenAPI(nil)
 
 	pathItem := spec.Paths["/users"]
 	if pathItem.Get == nil {
@@ -1029,4 +993,128 @@ func TestParseEnum_InvalidNumbers(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestGenerateOpenAPI_Filtering tests that GenerateOpenAPI filters handlers based on identity permissions
+func TestGenerateOpenAPI_Filtering(t *testing.T) {
+	engine := NewEngine("localhost", 8080, nil)
+
+	publicHandler := NewHandler[NoBody, testOutput](
+		"public",
+		"GET",
+		"/public",
+		func(req *Request[NoBody]) (testOutput, error) {
+			return testOutput{Message: "public"}, nil
+		},
+	)
+
+	readHandler := NewHandler[NoBody, testOutput](
+		"read",
+		"GET",
+		"/read",
+		func(req *Request[NoBody]) (testOutput, error) {
+			return testOutput{Message: "read"}, nil
+		},
+	).WithScopes("read")
+
+	adminHandler := NewHandler[NoBody, testOutput](
+		"admin",
+		"DELETE",
+		"/admin",
+		func(req *Request[NoBody]) (testOutput, error) {
+			return testOutput{Message: "admin"}, nil
+		},
+	).WithRoles("admin")
+
+	engine.WithHandlers(publicHandler, readHandler, adminHandler)
+
+	// Test: No identity - all handlers visible
+	spec := engine.GenerateOpenAPI(nil)
+	if len(spec.Paths) != 3 {
+		t.Errorf("no identity: expected 3 paths, got %d", len(spec.Paths))
+	}
+
+	// Test: Identity with read scope - public + read visible
+	readIdentity := &mockIdentity{scopes: []string{"read"}}
+	spec = engine.GenerateOpenAPI(readIdentity)
+	if len(spec.Paths) != 2 {
+		t.Errorf("read identity: expected 2 paths, got %d", len(spec.Paths))
+	}
+	if _, exists := spec.Paths["/public"]; !exists {
+		t.Error("read identity: expected /public to exist")
+	}
+	if _, exists := spec.Paths["/read"]; !exists {
+		t.Error("read identity: expected /read to exist")
+	}
+	if _, exists := spec.Paths["/admin"]; exists {
+		t.Error("read identity: expected /admin to NOT exist")
+	}
+
+	// Test: Identity with no permissions - only public visible
+	noPermIdentity := &mockIdentity{}
+	spec = engine.GenerateOpenAPI(noPermIdentity)
+	if len(spec.Paths) != 1 {
+		t.Errorf("no permissions: expected 1 path, got %d", len(spec.Paths))
+	}
+	if _, exists := spec.Paths["/public"]; !exists {
+		t.Error("no permissions: expected /public to exist")
+	}
+}
+
+// TestGenerateOpenAPI_WithTags tests engine-level tag descriptions
+func TestGenerateOpenAPI_WithTags(t *testing.T) {
+	engine := NewEngine("localhost", 8080, nil)
+	engine.WithTag("users", "User management endpoints")
+	engine.WithTag("posts", "Blog post endpoints")
+
+	handler := NewHandler[NoBody, testOutput](
+		"get-user",
+		"GET",
+		"/users",
+		func(req *Request[NoBody]) (testOutput, error) {
+			return testOutput{Message: "user"}, nil
+		},
+	).WithTags("users")
+
+	engine.WithHandlers(handler)
+	spec := engine.GenerateOpenAPI(nil)
+
+	if len(spec.Tags) != 2 {
+		t.Errorf("expected 2 tags, got %d", len(spec.Tags))
+	}
+
+	foundUsers := false
+	for _, tag := range spec.Tags {
+		if tag.Name == "users" && tag.Description == "User management endpoints" {
+			foundUsers = true
+		}
+	}
+	if !foundUsers {
+		t.Error("expected users tag with description")
+	}
+}
+
+type mockIdentity struct {
+	scopes []string
+	roles  []string
+}
+
+func (m *mockIdentity) ID() string            { return "test-id" }
+func (m *mockIdentity) TenantID() string      { return "test-tenant" }
+func (m *mockIdentity) Stats() map[string]int { return nil }
+func (m *mockIdentity) HasScope(scope string) bool {
+	for _, s := range m.scopes {
+		if s == scope {
+			return true
+		}
+	}
+	return false
+}
+func (m *mockIdentity) HasRole(role string) bool {
+	for _, r := range m.roles {
+		if r == role {
+			return true
+		}
+	}
+	return false
 }

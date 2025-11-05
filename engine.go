@@ -19,11 +19,12 @@ type Engine struct {
 	server              *http.Server
 	chiRouter           chi.Router
 	middleware          []func(http.Handler) http.Handler
-	handlers            []RouteHandler // Registered handlers for OpenAPI generation
+	handlers            []Endpoint // Registered handlers for OpenAPI generation
 	extractIdentity     func(context.Context, *http.Request) (Identity, error)
 	ctx                 context.Context
 	cancel              context.CancelFunc
 	defaultHandlersOnce sync.Once
+	spec                *EngineSpec // OpenAPI specification configuration
 }
 
 // NewEngine creates a new Engine with identity extraction.
@@ -54,6 +55,7 @@ func NewEngine(
 		extractIdentity: extractIdentity,
 		ctx:             ctx,
 		cancel:          cancel,
+		spec:            DefaultEngineSpec(),
 	}
 
 	// Create HTTP server
@@ -83,14 +85,44 @@ func (e *Engine) WithMiddleware(middleware ...func(http.Handler) http.Handler) *
 	return e
 }
 
+// WithSpec sets the engine specification for OpenAPI generation.
+func (e *Engine) WithSpec(spec *EngineSpec) *Engine {
+	e.spec = spec
+	return e
+}
+
+// WithOpenAPIInfo sets the OpenAPI Info metadata.
+func (e *Engine) WithOpenAPIInfo(info openapi.Info) *Engine {
+	e.spec.Info = info
+	return e
+}
+
+// WithTag adds a tag with description to the OpenAPI specification.
+// Tags are used to group operations in the documentation.
+func (e *Engine) WithTag(name, description string) *Engine {
+	// Check if tag already exists and update it
+	for i, tag := range e.spec.Tags {
+		if tag.Name == name {
+			e.spec.Tags[i].Description = description
+			return e
+		}
+	}
+	// Add new tag
+	e.spec.Tags = append(e.spec.Tags, openapi.Tag{
+		Name:        name,
+		Description: description,
+	})
+	return e
+}
+
 // Router returns the underlying chi.Router for advanced use cases.
 // This allows power users to register custom routes that won't appear in OpenAPI documentation.
 func (e *Engine) Router() chi.Router {
 	return e.chiRouter
 }
 
-// WithHandlers adds one or more RouteHandlers to the engine and returns the engine for chaining.
-func (e *Engine) WithHandlers(handlers ...RouteHandler) *Engine {
+// WithHandlers adds one or more Endpoints to the engine and returns the engine for chaining.
+func (e *Engine) WithHandlers(handlers ...Endpoint) *Engine {
 	// Ensure default handlers are registered first (only once)
 	e.ensureDefaultHandlers()
 
@@ -102,38 +134,39 @@ func (e *Engine) WithHandlers(handlers ...RouteHandler) *Engine {
 		httpHandler := e.adaptHandler(handler)
 
 		// Build middleware stack: handler middleware + auth middleware (if handler requires it)
+		handlerSpec := handler.Spec()
 		middleware := handler.Middleware()
 
 		// Add authentication middleware if handler requires it
-		if handler.RequiresAuth() && e.extractIdentity != nil {
+		if handlerSpec.RequiresAuth && e.extractIdentity != nil {
 			authMiddleware := e.buildAuthMiddleware()
 			middleware = append(middleware, authMiddleware)
 
 			// Add authorization middleware if handler has scope/role requirements
-			if len(handler.ScopeGroups()) > 0 || len(handler.RoleGroups()) > 0 {
+			if len(handlerSpec.ScopeGroups) > 0 || len(handlerSpec.RoleGroups) > 0 {
 				authzMiddleware := e.buildAuthorizationMiddleware(handler)
 				middleware = append(middleware, authzMiddleware)
 			}
 
 			// Add usage limit middleware if handler has usage limits
-			if len(handler.UsageLimits()) > 0 {
+			if len(handlerSpec.UsageLimits) > 0 {
 				usageLimitMiddleware := e.buildUsageLimitMiddleware(handler)
 				middleware = append(middleware, usageLimitMiddleware)
 			}
 		}
 
 		if len(middleware) > 0 {
-			e.chiRouter.With(middleware...).Method(handler.Method(), handler.Path(), httpHandler)
+			e.chiRouter.With(middleware...).Method(handlerSpec.Method, handlerSpec.Path, httpHandler)
 		} else {
 			// Register with Chi (no handler middleware).
-			e.chiRouter.Method(handler.Method(), handler.Path(), httpHandler)
+			e.chiRouter.Method(handlerSpec.Method, handlerSpec.Path, httpHandler)
 		}
 
 		// Emit handler registered event
 		capitan.Debug(e.ctx, HandlerRegistered,
-			HandlerNameKey.Field(handler.Name()),
-			MethodKey.Field(handler.Method()),
-			PathKey.Field(handler.Path()),
+			HandlerNameKey.Field(handlerSpec.Name),
+			MethodKey.Field(handlerSpec.Method),
+			PathKey.Field(handlerSpec.Path),
 		)
 	}
 	return e
@@ -180,9 +213,10 @@ const identityContextKey contextKey = "rocco_identity"
 
 // buildAuthorizationMiddleware creates middleware that checks scope and role requirements.
 // Scope/role groups use OR within each group, AND across groups.
-func (*Engine) buildAuthorizationMiddleware(handler RouteHandler) func(http.Handler) http.Handler {
-	scopeGroups := handler.ScopeGroups()
-	roleGroups := handler.RoleGroups()
+func (*Engine) buildAuthorizationMiddleware(handler Endpoint) func(http.Handler) http.Handler {
+	handlerSpec := handler.Spec()
+	scopeGroups := handlerSpec.ScopeGroups
+	roleGroups := handlerSpec.RoleGroups
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -257,8 +291,9 @@ func (*Engine) buildAuthorizationMiddleware(handler RouteHandler) func(http.Hand
 }
 
 // buildUsageLimitMiddleware creates middleware that checks usage limits from identity stats.
-func (*Engine) buildUsageLimitMiddleware(handler RouteHandler) func(http.Handler) http.Handler {
-	usageLimits := handler.UsageLimits()
+func (*Engine) buildUsageLimitMiddleware(handler Endpoint) func(http.Handler) http.Handler {
+	handlerSpec := handler.Spec()
+	usageLimits := handlerSpec.UsageLimits
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -319,10 +354,7 @@ func (e *Engine) ensureDefaultHandlers() {
 func (e *Engine) registerDefaultHandlers() {
 	// OpenAPI spec handler at /openapi
 	e.chiRouter.Get("/openapi", func(w http.ResponseWriter, _ *http.Request) {
-		spec := e.GenerateOpenAPI(openapi.Info{
-			Title:   "API",
-			Version: "1.0.0",
-		})
+		spec := e.GenerateOpenAPI(nil)
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
@@ -359,8 +391,10 @@ func (e *Engine) registerDefaultHandlers() {
 	})
 }
 
-// adaptHandler converts a RouteHandler to http.HandlerFunc.
-func (*Engine) adaptHandler(handler RouteHandler) http.HandlerFunc {
+// adaptHandler converts a Endpoint to http.HandlerFunc.
+func (*Engine) adaptHandler(handler Endpoint) http.HandlerFunc {
+	handlerSpec := handler.Spec()
+
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
 		startTime := time.Now()
@@ -369,7 +403,7 @@ func (*Engine) adaptHandler(handler RouteHandler) http.HandlerFunc {
 		capitan.Debug(ctx, RequestReceived,
 			MethodKey.Field(r.Method),
 			PathKey.Field(r.URL.Path),
-			HandlerNameKey.Field(handler.Name()),
+			HandlerNameKey.Field(handlerSpec.Name),
 		)
 
 		// Handler processes and writes response
@@ -383,7 +417,7 @@ func (*Engine) adaptHandler(handler RouteHandler) http.HandlerFunc {
 			capitan.Error(ctx, RequestFailed,
 				MethodKey.Field(r.Method),
 				PathKey.Field(r.URL.Path),
-				HandlerNameKey.Field(handler.Name()),
+				HandlerNameKey.Field(handlerSpec.Name),
 				StatusCodeKey.Field(status),
 				DurationMsKey.Field(durationMs),
 				ErrorKey.Field(err.Error()),
@@ -392,7 +426,7 @@ func (*Engine) adaptHandler(handler RouteHandler) http.HandlerFunc {
 			capitan.Info(ctx, RequestCompleted,
 				MethodKey.Field(r.Method),
 				PathKey.Field(r.URL.Path),
-				HandlerNameKey.Field(handler.Name()),
+				HandlerNameKey.Field(handlerSpec.Name),
 				StatusCodeKey.Field(status),
 				DurationMsKey.Field(durationMs),
 			)

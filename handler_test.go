@@ -45,17 +45,18 @@ func TestNewHandler(t *testing.T) {
 		},
 	)
 
-	if handler.Name() != "test-handler" {
-		t.Errorf("expected name 'test-handler', got %q", handler.Name())
+	spec := handler.Spec()
+	if spec.Name != "test-handler" {
+		t.Errorf("expected name 'test-handler', got %q", spec.Name)
 	}
-	if handler.Method() != "POST" {
-		t.Errorf("expected method 'POST', got %q", handler.Method())
+	if spec.Method != "POST" {
+		t.Errorf("expected method 'POST', got %q", spec.Method)
 	}
-	if handler.Path() != "/test" {
-		t.Errorf("expected path '/test', got %q", handler.Path())
+	if spec.Path != "/test" {
+		t.Errorf("expected path '/test', got %q", spec.Path)
 	}
-	if handler.SuccessStatus() != 200 {
-		t.Errorf("expected default success status 200, got %d", handler.SuccessStatus())
+	if spec.SuccessStatus != 200 {
+		t.Errorf("expected default success status 200, got %d", spec.SuccessStatus)
 	}
 	if handler.InputMeta.TypeName != "testInput" {
 		t.Errorf("expected input type 'testInput', got %q", handler.InputMeta.TypeName)
@@ -83,26 +84,27 @@ func TestHandler_WithBuilderMethods(t *testing.T) {
 		WithResponseHeaders(map[string]string{"X-Custom": "value"}).
 		WithErrorCodes(400, 404)
 
-	if handler.Summary() != "Test summary" {
-		t.Errorf("expected summary 'Test summary', got %q", handler.Summary())
+	spec := handler.Spec()
+	if spec.Summary != "Test summary" {
+		t.Errorf("expected summary 'Test summary', got %q", spec.Summary)
 	}
-	if handler.Description() != "Test description" {
-		t.Errorf("expected description 'Test description', got %q", handler.Description())
+	if spec.Description != "Test description" {
+		t.Errorf("expected description 'Test description', got %q", spec.Description)
 	}
-	if len(handler.Tags()) != 2 {
-		t.Errorf("expected 2 tags, got %d", len(handler.Tags()))
+	if len(spec.Tags) != 2 {
+		t.Errorf("expected 2 tags, got %d", len(spec.Tags))
 	}
-	if handler.SuccessStatus() != 201 {
-		t.Errorf("expected success status 201, got %d", handler.SuccessStatus())
+	if spec.SuccessStatus != 201 {
+		t.Errorf("expected success status 201, got %d", spec.SuccessStatus)
 	}
-	if len(handler.PathParams()) != 1 {
-		t.Errorf("expected 1 path param, got %d", len(handler.PathParams()))
+	if len(spec.PathParams) != 1 {
+		t.Errorf("expected 1 path param, got %d", len(spec.PathParams))
 	}
-	if len(handler.QueryParams()) != 2 {
-		t.Errorf("expected 2 query params, got %d", len(handler.QueryParams()))
+	if len(spec.QueryParams) != 2 {
+		t.Errorf("expected 2 query params, got %d", len(spec.QueryParams))
 	}
-	if len(handler.ErrorCodes()) != 2 {
-		t.Errorf("expected 2 error codes, got %d", len(handler.ErrorCodes()))
+	if len(spec.ErrorCodes) != 2 {
+		t.Errorf("expected 2 error codes, got %d", len(spec.ErrorCodes))
 	}
 }
 
@@ -537,25 +539,6 @@ func TestHandler_Close(t *testing.T) {
 	err := handler.Close()
 	if err != nil {
 		t.Errorf("expected nil error, got %v", err)
-	}
-}
-
-func TestHandler_OutputSchema(t *testing.T) {
-	handler := NewHandler[NoBody, testOutput](
-		"test",
-		"GET",
-		"/test",
-		func(_ *Request[NoBody]) (testOutput, error) {
-			return testOutput{}, nil
-		},
-	)
-
-	schema := handler.OutputSchema()
-	if schema == nil {
-		t.Fatal("expected non-nil schema")
-	}
-	if schema.Type != "object" {
-		t.Errorf("expected type 'object', got %q", schema.Type)
 	}
 }
 

@@ -390,8 +390,8 @@ func TestAuthz_RequiresAuthImplied(t *testing.T) {
 			},
 		).WithScopes("read")
 
-		if !handler.RequiresAuth() {
-			t.Error("expected RequiresAuth() to be true after WithScopes()")
+		if !handler.Spec().RequiresAuth {
+			t.Error("expected RequiresAuth to be true after WithScopes()")
 		}
 	})
 
@@ -405,8 +405,8 @@ func TestAuthz_RequiresAuthImplied(t *testing.T) {
 			},
 		).WithRoles("user")
 
-		if !handler.RequiresAuth() {
-			t.Error("expected RequiresAuth() to be true after WithRoles()")
+		if !handler.Spec().RequiresAuth {
+			t.Error("expected RequiresAuth to be true after WithRoles()")
 		}
 	})
 }
@@ -688,8 +688,8 @@ func TestUsageLimit_RequiresAuth(t *testing.T) {
 		},
 	).WithUsageLimit("requests_today", func(Identity) int { return 100 })
 
-	if !handler.RequiresAuth() {
-		t.Error("expected RequiresAuth() to be true after WithUsageLimit()")
+	if !handler.Spec().RequiresAuth {
+		t.Error("expected RequiresAuth to be true after WithUsageLimit()")
 	}
 }
 

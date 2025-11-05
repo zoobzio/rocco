@@ -477,13 +477,6 @@ func statusCodeToResponseName(code int) string {
 	}
 }
 
-// isNoBodySchema checks if a schema represents the NoBody type
-func isNoBodySchema(schema *openapi.Schema) bool {
-	// NoBody will have TypeName "NoBody" in sentinel metadata
-	// The schema will be an empty object with no properties
-	return schema != nil && schema.Type == "object" && len(schema.Properties) == 0
-}
-
 // setOperationForMethod sets the operation on the correct method field of PathItem
 func setOperationForMethod(pathItem *openapi.PathItem, method string, operation *openapi.Operation) {
 	switch method {
@@ -504,11 +497,54 @@ func setOperationForMethod(pathItem *openapi.PathItem, method string, operation 
 	}
 }
 
-// GenerateOpenAPI creates an OpenAPI specification from registered handlers
-func (e *Engine) GenerateOpenAPI(info openapi.Info) *openapi.OpenAPI {
+// isHandlerAccessible checks if an identity has access to a handler based on scope/role requirements.
+func isHandlerAccessible(handler Endpoint, identity Identity) bool {
+	handlerSpec := handler.Spec()
+
+	// If handler doesn't require auth, it's accessible
+	if !handlerSpec.RequiresAuth {
+		return true
+	}
+
+	// Check scope requirements (AND across groups, OR within group)
+	for _, scopeGroup := range handlerSpec.ScopeGroups {
+		hasAnyScope := false
+		for _, scope := range scopeGroup {
+			if identity.HasScope(scope) {
+				hasAnyScope = true
+				break
+			}
+		}
+		if !hasAnyScope {
+			return false // Missing required scope group
+		}
+	}
+
+	// Check role requirements (AND across groups, OR within group)
+	for _, roleGroup := range handlerSpec.RoleGroups {
+		hasAnyRole := false
+		for _, role := range roleGroup {
+			if identity.HasRole(role) {
+				hasAnyRole = true
+				break
+			}
+		}
+		if !hasAnyRole {
+			return false // Missing required role group
+		}
+	}
+
+	return true
+}
+
+// GenerateOpenAPI creates an OpenAPI specification from registered handlers.
+// If identity is provided, only handlers accessible to that identity will be included.
+func (e *Engine) GenerateOpenAPI(identity Identity) *openapi.OpenAPI {
 	spec := &openapi.OpenAPI{
 		OpenAPI: "3.0.3",
-		Info:    info,
+		Info:    e.spec.Info,
+		Tags:    e.spec.Tags,
+		Servers: e.spec.Servers,
 		Paths:   make(map[string]openapi.PathItem),
 		Components: &openapi.Components{
 			Schemas:   make(map[string]*openapi.Schema),
@@ -516,10 +552,18 @@ func (e *Engine) GenerateOpenAPI(info openapi.Info) *openapi.OpenAPI {
 		},
 	}
 
+	if e.spec.ExternalDocs != nil {
+		spec.ExternalDocs = e.spec.ExternalDocs
+	}
+
+	if len(e.spec.Security) > 0 {
+		spec.Security = e.spec.Security
+	}
+
 	// Check if any handlers require authentication
 	hasAuth := false
 	for _, handler := range e.handlers {
-		if handler.RequiresAuth() {
+		if handler.Spec().RequiresAuth {
 			hasAuth = true
 			break
 		}
@@ -643,26 +687,30 @@ func (e *Engine) GenerateOpenAPI(info openapi.Info) *openapi.OpenAPI {
 
 	// Iterate over registered handlers
 	for _, handler := range e.handlers {
-		path := handler.Path()
-		method := handler.Method()
+		// Filter handlers based on identity permissions if provided
+		if identity != nil && !isHandlerAccessible(handler, identity) {
+			continue
+		}
+
+		handlerSpec := handler.Spec()
 
 		// Get or create PathItem
-		pathItem, exists := spec.Paths[path]
+		pathItem, exists := spec.Paths[handlerSpec.Path]
 		if !exists {
 			pathItem = openapi.PathItem{}
 		}
 
 		// Build operation
 		operation := &openapi.Operation{
-			OperationID: handler.Name(),
-			Summary:     handler.Summary(),
-			Description: handler.Description(),
-			Tags:        handler.Tags(),
+			OperationID: handlerSpec.Name,
+			Summary:     handlerSpec.Summary,
+			Description: handlerSpec.Description,
+			Tags:        handlerSpec.Tags,
 			Responses:   make(map[string]openapi.Response),
 		}
 
 		// Add path parameters
-		for _, paramName := range handler.PathParams() {
+		for _, paramName := range handlerSpec.PathParams {
 			operation.Parameters = append(operation.Parameters, openapi.Parameter{
 				Name:     paramName,
 				In:       "path",
@@ -672,7 +720,7 @@ func (e *Engine) GenerateOpenAPI(info openapi.Info) *openapi.OpenAPI {
 		}
 
 		// Add query parameters
-		for _, paramName := range handler.QueryParams() {
+		for _, paramName := range handlerSpec.QueryParams {
 			operation.Parameters = append(operation.Parameters, openapi.Parameter{
 				Name:     paramName,
 				In:       "query",
@@ -682,11 +730,9 @@ func (e *Engine) GenerateOpenAPI(info openapi.Info) *openapi.OpenAPI {
 		}
 
 		// Add request body if not NoBody
-		inputSchema := handler.InputSchema()
-		if !isNoBodySchema(inputSchema) {
-			inputSchemaName := handler.InputTypeName()
+		if handlerSpec.InputTypeName != "NoBody" {
 			// Recursively collect input type and all nested types
-			if inputMeta, found := sentinel.Lookup(inputSchemaName); found {
+			if inputMeta, found := sentinel.Lookup(handlerSpec.InputTypeName); found {
 				collectSchemas(inputMeta)
 			}
 
@@ -694,31 +740,29 @@ func (e *Engine) GenerateOpenAPI(info openapi.Info) *openapi.OpenAPI {
 				Required: true,
 				Content: map[string]openapi.MediaType{
 					"application/json": {
-						Schema: &openapi.Schema{Ref: "#/components/schemas/" + inputSchemaName},
+						Schema: &openapi.Schema{Ref: "#/components/schemas/" + handlerSpec.InputTypeName},
 					},
 				},
 			}
 		}
 
 		// Add success response
-		outputSchemaName := handler.OutputTypeName()
 		// Recursively collect output type and all nested types
-		if outputMeta, found := sentinel.Lookup(outputSchemaName); found {
+		if outputMeta, found := sentinel.Lookup(handlerSpec.OutputTypeName); found {
 			collectSchemas(outputMeta)
 		}
 
-		successStatus := handler.SuccessStatus()
-		operation.Responses[fmt.Sprintf("%d", successStatus)] = openapi.Response{
+		operation.Responses[fmt.Sprintf("%d", handlerSpec.SuccessStatus)] = openapi.Response{
 			Description: "Success",
 			Content: map[string]openapi.MediaType{
 				"application/json": {
-					Schema: &openapi.Schema{Ref: "#/components/schemas/" + outputSchemaName},
+					Schema: &openapi.Schema{Ref: "#/components/schemas/" + handlerSpec.OutputTypeName},
 				},
 			},
 		}
 
 		// Add error responses
-		for _, errorCode := range handler.ErrorCodes() {
+		for _, errorCode := range handlerSpec.ErrorCodes {
 			responseName := statusCodeToResponseName(errorCode)
 			operation.Responses[fmt.Sprintf("%d", errorCode)] = openapi.Response{
 				Description: responseName,
@@ -731,10 +775,10 @@ func (e *Engine) GenerateOpenAPI(info openapi.Info) *openapi.OpenAPI {
 		}
 
 		// Add security requirements if handler requires authentication
-		if handler.RequiresAuth() {
+		if handlerSpec.RequiresAuth {
 			// Collect all required scopes (flattened from all groups)
 			var allScopes []string
-			for _, scopeGroup := range handler.ScopeGroups() {
+			for _, scopeGroup := range handlerSpec.ScopeGroups {
 				allScopes = append(allScopes, scopeGroup...)
 			}
 
@@ -753,7 +797,7 @@ func (e *Engine) GenerateOpenAPI(info openapi.Info) *openapi.OpenAPI {
 			}
 
 			// Add 403 Forbidden error response if handler has scope/role requirements
-			if len(handler.ScopeGroups()) > 0 || len(handler.RoleGroups()) > 0 {
+			if len(handlerSpec.ScopeGroups) > 0 || len(handlerSpec.RoleGroups) > 0 {
 				operation.Responses["403"] = openapi.Response{
 					Description: "Forbidden - insufficient permissions",
 					Content: map[string]openapi.MediaType{
@@ -766,10 +810,10 @@ func (e *Engine) GenerateOpenAPI(info openapi.Info) *openapi.OpenAPI {
 		}
 
 		// Set operation on path item
-		setOperationForMethod(&pathItem, method, operation)
+		setOperationForMethod(&pathItem, handlerSpec.Method, operation)
 
 		// Update paths
-		spec.Paths[path] = pathItem
+		spec.Paths[handlerSpec.Path] = pathItem
 	}
 
 	// Add collected schemas to components

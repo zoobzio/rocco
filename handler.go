@@ -11,7 +11,6 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-playground/validator/v10"
 	"github.com/zoobzio/capitan"
-	"github.com/zoobzio/openapi"
 	"github.com/zoobzio/sentinel"
 )
 
@@ -22,32 +21,17 @@ type UsageLimit struct {
 }
 
 // Handler wraps a typed handler function with metadata for documentation and parsing.
-// It implements RouteHandler interface.
+// It implements Endpoint interface.
 // The handler function receives a Request with typed input and parameters.
 type Handler[In, Out any] struct {
 	// Core handler function receives Request with typed body.
 	fn func(*Request[In]) (Out, error)
 
-	// Handler name.
-	name string
+	// Declarative specification
+	spec HandlerSpec
 
-	// Route metadata.
-	method string
-	path   string
-
-	// OpenAPI metadata.
-	summary     string
-	description string
-	tags        []string
-
-	// Parameter specifications.
-	pathParams  []string // Required path parameter names.
-	queryParams []string // Required query parameter names.
-
-	// HTTP response.
-	successStatus   int               // Status code for successful responses (default 200).
+	// Runtime configuration
 	responseHeaders map[string]string // Default response headers.
-	errorCodes      []int             // Declared error status codes this handler may return.
 	maxBodySize     int64             // Maximum request body size in bytes (0 = unlimited, default: 10MB).
 
 	// Type metadata from sentinel.
@@ -59,30 +43,20 @@ type Handler[In, Out any] struct {
 
 	// Middleware.
 	middleware []func(http.Handler) http.Handler
-
-	// Authentication.
-	requiresAuth bool
-
-	// Authorization - scopes and roles (OR within group, AND across groups).
-	scopeGroups [][]string // e.g., [["read", "write"], ["admin"]] = (read OR write) AND admin
-	roleGroups  [][]string // e.g., [["admin", "moderator"], ["verified"]] = (admin OR moderator) AND verified
-
-	// Usage limits - rate limiting based on identity stats.
-	usageLimits []UsageLimit
 }
 
-// Process implements RouteHandler.
+// Process implements Endpoint.
 func (h *Handler[In, Out]) Process(ctx context.Context, r *http.Request, w http.ResponseWriter) (int, error) {
 	// Emit handler executing event
 	capitan.Debug(ctx, HandlerExecuting,
-		HandlerNameKey.Field(h.name),
+		HandlerNameKey.Field(h.spec.Name),
 	)
 
 	// Extract and validate parameters.
 	params, err := h.extractParams(ctx, r)
 	if err != nil {
 		capitan.Error(ctx, RequestParamsInvalid,
-			HandlerNameKey.Field(h.name),
+			HandlerNameKey.Field(h.spec.Name),
 			ErrorKey.Field(err.Error()),
 		)
 		writeErrorResponse(w, http.StatusUnprocessableEntity)
@@ -101,7 +75,7 @@ func (h *Handler[In, Out]) Process(ctx context.Context, r *http.Request, w http.
 		body, readErr := io.ReadAll(bodyReader)
 		if readErr != nil {
 			capitan.Error(ctx, RequestBodyReadError,
-				HandlerNameKey.Field(h.name),
+				HandlerNameKey.Field(h.spec.Name),
 				ErrorKey.Field(readErr.Error()),
 			)
 			writeErrorResponse(w, http.StatusBadRequest)
@@ -112,7 +86,7 @@ func (h *Handler[In, Out]) Process(ctx context.Context, r *http.Request, w http.
 		if len(body) > 0 {
 			if unmarshalErr := json.Unmarshal(body, &input); unmarshalErr != nil {
 				capitan.Error(ctx, RequestBodyParseError,
-					HandlerNameKey.Field(h.name),
+					HandlerNameKey.Field(h.spec.Name),
 					ErrorKey.Field(unmarshalErr.Error()),
 				)
 				writeErrorResponse(w, http.StatusUnprocessableEntity)
@@ -122,7 +96,7 @@ func (h *Handler[In, Out]) Process(ctx context.Context, r *http.Request, w http.
 			// Validate input.
 			if inputErr := h.validator.Struct(input); inputErr != nil {
 				capitan.Warn(ctx, RequestValidationInputFailed,
-					HandlerNameKey.Field(h.name),
+					HandlerNameKey.Field(h.spec.Name),
 					ErrorKey.Field(inputErr.Error()),
 				)
 				writeValidationErrorResponse(w, inputErr)
@@ -159,7 +133,7 @@ func (h *Handler[In, Out]) Process(ctx context.Context, r *http.Request, w http.
 			if !h.isErrorCodeDeclared(status) {
 				// Undeclared sentinel error - programming error.
 				capitan.Warn(ctx, HandlerUndeclaredSentinel,
-					HandlerNameKey.Field(h.name),
+					HandlerNameKey.Field(h.spec.Name),
 					ErrorKey.Field(err.Error()),
 					StatusCodeKey.Field(status),
 				)
@@ -169,7 +143,7 @@ func (h *Handler[In, Out]) Process(ctx context.Context, r *http.Request, w http.
 
 			// Declared sentinel error - successful handling.
 			capitan.Warn(ctx, HandlerSentinelError,
-				HandlerNameKey.Field(h.name),
+				HandlerNameKey.Field(h.spec.Name),
 				ErrorKey.Field(err.Error()),
 				StatusCodeKey.Field(status),
 			)
@@ -179,7 +153,7 @@ func (h *Handler[In, Out]) Process(ctx context.Context, r *http.Request, w http.
 
 		// Real error.
 		capitan.Error(ctx, HandlerError,
-			HandlerNameKey.Field(h.name),
+			HandlerNameKey.Field(h.spec.Name),
 			ErrorKey.Field(err.Error()),
 		)
 		writeErrorResponse(w, http.StatusInternalServerError)
@@ -189,7 +163,7 @@ func (h *Handler[In, Out]) Process(ctx context.Context, r *http.Request, w http.
 	// Validate output.
 	if validErr := h.validator.Struct(output); validErr != nil {
 		capitan.Warn(ctx, RequestValidationOutputFailed,
-			HandlerNameKey.Field(h.name),
+			HandlerNameKey.Field(h.spec.Name),
 			ErrorKey.Field(validErr.Error()),
 		)
 		writeErrorResponse(w, http.StatusInternalServerError)
@@ -200,7 +174,7 @@ func (h *Handler[In, Out]) Process(ctx context.Context, r *http.Request, w http.
 	body, err := json.Marshal(output)
 	if err != nil {
 		capitan.Error(ctx, RequestResponseMarshalError,
-			HandlerNameKey.Field(h.name),
+			HandlerNameKey.Field(h.spec.Name),
 			ErrorKey.Field(err.Error()),
 		)
 		writeErrorResponse(w, http.StatusInternalServerError)
@@ -214,107 +188,55 @@ func (h *Handler[In, Out]) Process(ctx context.Context, r *http.Request, w http.
 	w.Header().Set("Content-Type", "application/json")
 
 	// Write status and body.
-	w.WriteHeader(h.successStatus)
+	w.WriteHeader(h.spec.SuccessStatus)
 	w.Write(body)
 
 	// Emit handler success event
 	capitan.Info(ctx, HandlerSuccess,
-		HandlerNameKey.Field(h.name),
-		StatusCodeKey.Field(h.successStatus),
+		HandlerNameKey.Field(h.spec.Name),
+		StatusCodeKey.Field(h.spec.SuccessStatus),
 	)
 
-	return h.successStatus, nil
+	return h.spec.SuccessStatus, nil
 }
 
-// Name implements RouteHandler.
-func (h *Handler[In, Out]) Name() string {
-	return h.name
+// Spec implements Endpoint.
+func (h *Handler[In, Out]) Spec() HandlerSpec {
+	return h.spec
 }
 
-// Close implements RouteHandler.
+// Close implements Endpoint.
 func (*Handler[In, Out]) Close() error {
 	return nil
 }
 
-// Method implements RouteHandler.
-func (h *Handler[In, Out]) Method() string {
-	return h.method
-}
-
-// Path implements RouteHandler.
-func (h *Handler[In, Out]) Path() string {
-	return h.path
-}
-
-// Summary implements RouteHandler.
-func (h *Handler[In, Out]) Summary() string {
-	return h.summary
-}
-
-// Description implements RouteHandler.
-func (h *Handler[In, Out]) Description() string {
-	return h.description
-}
-
-// Tags implements RouteHandler.
-func (h *Handler[In, Out]) Tags() []string {
-	return h.tags
-}
-
-// PathParams implements RouteHandler.
-func (h *Handler[In, Out]) PathParams() []string {
-	return h.pathParams
-}
-
-// QueryParams implements RouteHandler.
-func (h *Handler[In, Out]) QueryParams() []string {
-	return h.queryParams
-}
-
-// SuccessStatus implements RouteHandler.
-func (h *Handler[In, Out]) SuccessStatus() int {
-	return h.successStatus
-}
-
-// ErrorCodes implements RouteHandler.
-func (h *Handler[In, Out]) ErrorCodes() []int {
-	return h.errorCodes
-}
-
-// InputSchema implements RouteHandler.
-func (h *Handler[In, Out]) InputSchema() *openapi.Schema {
-	return metadataToSchema(h.InputMeta)
-}
-
-// OutputSchema implements RouteHandler.
-func (h *Handler[In, Out]) OutputSchema() *openapi.Schema {
-	return metadataToSchema(h.OutputMeta)
-}
-
-// InputTypeName implements RouteHandler.
-func (h *Handler[In, Out]) InputTypeName() string {
-	return h.InputMeta.TypeName
-}
-
-// OutputTypeName implements RouteHandler.
-func (h *Handler[In, Out]) OutputTypeName() string {
-	return h.OutputMeta.TypeName
-}
-
 // NewHandler creates a new typed handler with sentinel metadata.
 func NewHandler[In, Out any](name string, method, path string, fn func(*Request[In]) (Out, error)) *Handler[In, Out] {
+	inputMeta := sentinel.Scan[In]()
+	outputMeta := sentinel.Scan[Out]()
+
 	return &Handler[In, Out]{
-		name:            name,
-		method:          method,
-		path:            path,
-		fn:              fn,
-		pathParams:      []string{},
-		queryParams:     []string{},
-		successStatus:   http.StatusOK, // Default to 200.
+		fn: fn,
+		spec: HandlerSpec{
+			Name:           name,
+			Method:         method,
+			Path:           path,
+			PathParams:     []string{},
+			QueryParams:    []string{},
+			InputTypeName:  inputMeta.TypeName,
+			OutputTypeName: outputMeta.TypeName,
+			SuccessStatus:  http.StatusOK, // Default to 200.
+			ErrorCodes:     []int{},
+			RequiresAuth:   false,
+			ScopeGroups:    [][]string{},
+			RoleGroups:     [][]string{},
+			UsageLimits:    []UsageLimit{},
+			Tags:           []string{},
+		},
 		responseHeaders: make(map[string]string),
 		maxBodySize:     10 * 1024 * 1024, // Default to 10MB.
-		InputMeta:       sentinel.Scan[In](),
-		OutputMeta:      sentinel.Scan[Out](),
+		InputMeta:       inputMeta,
+		OutputMeta:      outputMeta,
 		validator:       validator.New(),
 		middleware:      make([]func(http.Handler) http.Handler, 0),
 	}
@@ -322,37 +244,37 @@ func NewHandler[In, Out any](name string, method, path string, fn func(*Request[
 
 // WithSummary sets the OpenAPI summary.
 func (h *Handler[In, Out]) WithSummary(summary string) *Handler[In, Out] {
-	h.summary = summary
+	h.spec.Summary = summary
 	return h
 }
 
 // WithDescription sets the OpenAPI description.
 func (h *Handler[In, Out]) WithDescription(desc string) *Handler[In, Out] {
-	h.description = desc
+	h.spec.Description = desc
 	return h
 }
 
 // WithTags sets the OpenAPI tags.
 func (h *Handler[In, Out]) WithTags(tags ...string) *Handler[In, Out] {
-	h.tags = tags
+	h.spec.Tags = tags
 	return h
 }
 
 // WithSuccessStatus sets the HTTP status code for successful responses.
 func (h *Handler[In, Out]) WithSuccessStatus(status int) *Handler[In, Out] {
-	h.successStatus = status
+	h.spec.SuccessStatus = status
 	return h
 }
 
 // WithPathParams specifies required path parameters.
 func (h *Handler[In, Out]) WithPathParams(params ...string) *Handler[In, Out] {
-	h.pathParams = params
+	h.spec.PathParams = params
 	return h
 }
 
 // WithQueryParams specifies required query parameters.
 func (h *Handler[In, Out]) WithQueryParams(params ...string) *Handler[In, Out] {
-	h.queryParams = params
+	h.spec.QueryParams = params
 	return h
 }
 
@@ -366,7 +288,7 @@ func (h *Handler[In, Out]) WithResponseHeaders(headers map[string]string) *Handl
 // Undeclared sentinel errors will be converted to 500 Internal Server Error.
 // This is used for OpenAPI documentation generation.
 func (h *Handler[In, Out]) WithErrorCodes(codes ...int) *Handler[In, Out] {
-	h.errorCodes = codes
+	h.spec.ErrorCodes = codes
 	return h
 }
 
@@ -383,19 +305,14 @@ func (h *Handler[In, Out]) WithMiddleware(middleware ...func(http.Handler) http.
 	return h
 }
 
-// Middleware returns the handler's middleware stack.
+// Middleware implements Endpoint.
 func (h *Handler[In, Out]) Middleware() []func(http.Handler) http.Handler {
 	return h.middleware
 }
 
-// RequiresAuth returns whether this handler requires authentication.
-func (h *Handler[In, Out]) RequiresAuth() bool {
-	return h.requiresAuth
-}
-
 // WithAuthentication marks this handler as requiring authentication.
 func (h *Handler[In, Out]) WithAuthentication() *Handler[In, Out] {
-	h.requiresAuth = true
+	h.spec.RequiresAuth = true
 	return h
 }
 
@@ -404,9 +321,9 @@ func (h *Handler[In, Out]) WithAuthentication() *Handler[In, Out] {
 // Calling multiple times creates AND: .WithScopes("read").WithScopes("admin") = read AND admin.
 func (h *Handler[In, Out]) WithScopes(scopes ...string) *Handler[In, Out] {
 	if len(scopes) > 0 {
-		h.scopeGroups = append(h.scopeGroups, scopes)
+		h.spec.ScopeGroups = append(h.spec.ScopeGroups, scopes)
 		// Scopes require authentication
-		h.requiresAuth = true
+		h.spec.RequiresAuth = true
 	}
 	return h
 }
@@ -416,21 +333,11 @@ func (h *Handler[In, Out]) WithScopes(scopes ...string) *Handler[In, Out] {
 // Calling multiple times creates AND: .WithRoles("admin").WithRoles("verified") = admin AND verified.
 func (h *Handler[In, Out]) WithRoles(roles ...string) *Handler[In, Out] {
 	if len(roles) > 0 {
-		h.roleGroups = append(h.roleGroups, roles)
+		h.spec.RoleGroups = append(h.spec.RoleGroups, roles)
 		// Roles require authentication
-		h.requiresAuth = true
+		h.spec.RequiresAuth = true
 	}
 	return h
-}
-
-// ScopeGroups returns the scope requirement groups.
-func (h *Handler[In, Out]) ScopeGroups() [][]string {
-	return h.scopeGroups
-}
-
-// RoleGroups returns the role requirement groups.
-func (h *Handler[In, Out]) RoleGroups() [][]string {
-	return h.roleGroups
 }
 
 // WithUsageLimit adds a usage limit check based on identity stats.
@@ -438,18 +345,13 @@ func (h *Handler[In, Out]) RoleGroups() [][]string {
 // The thresholdFunc is called with the identity to allow dynamic limits per user/tenant.
 // Usage limits require authentication.
 func (h *Handler[In, Out]) WithUsageLimit(key string, thresholdFunc func(Identity) int) *Handler[In, Out] {
-	h.usageLimits = append(h.usageLimits, UsageLimit{
+	h.spec.UsageLimits = append(h.spec.UsageLimits, UsageLimit{
 		Key:           key,
 		ThresholdFunc: thresholdFunc,
 	})
 	// Usage limits require authentication
-	h.requiresAuth = true
+	h.spec.RequiresAuth = true
 	return h
-}
-
-// UsageLimits returns the usage limit configuration.
-func (h *Handler[In, Out]) UsageLimits() []UsageLimit {
-	return h.usageLimits
 }
 
 // extractParams extracts and validates required parameters from the request.
@@ -467,16 +369,16 @@ func (h *Handler[In, Out]) extractParams(ctx context.Context, r *http.Request) (
 	}
 
 	// Validate required path params.
-	for _, requiredParam := range h.pathParams {
+	for _, requiredParam := range h.spec.PathParams {
 		if _, exists := params.Path[requiredParam]; !exists {
 			return nil, fmt.Errorf("path parameter %q", requiredParam)
 		}
 	}
 
 	// Extract only declared query params (if any declared).
-	if len(h.queryParams) > 0 {
+	if len(h.spec.QueryParams) > 0 {
 		query := r.URL.Query()
-		for _, declaredParam := range h.queryParams {
+		for _, declaredParam := range h.spec.QueryParams {
 			if values := query[declaredParam]; len(values) > 0 {
 				params.Query[declaredParam] = values[0]
 			}
@@ -543,7 +445,7 @@ func mapSentinelToStatus(err error) int {
 
 // isErrorCodeDeclared checks if an error status code was declared via WithErrorCodes.
 func (h *Handler[In, Out]) isErrorCodeDeclared(status int) bool {
-	for _, code := range h.errorCodes {
+	for _, code := range h.spec.ErrorCodes {
 		if code == status {
 			return true
 		}

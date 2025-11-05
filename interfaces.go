@@ -3,50 +3,19 @@ package rocco
 import (
 	"context"
 	"net/http"
-
-	"github.com/zoobzio/openapi"
 )
 
-// RouteHandler represents an HTTP route handler with metadata.
-type RouteHandler interface {
+// Endpoint represents an HTTP route handler with metadata.
+type Endpoint interface {
 	// Process handles the HTTP request and writes the response.
 	// Returns the HTTP status code written and any error encountered.
 	Process(ctx context.Context, r *http.Request, w http.ResponseWriter) (int, error)
 
-	// Name returns the handler identifier
-	Name() string
+	// Spec returns the declarative specification for this handler
+	Spec() HandlerSpec
 
-	// Routing metadata
-	Method() string
-	Path() string
-
-	// Middleware
+	// Middleware returns handler-specific middleware
 	Middleware() []func(http.Handler) http.Handler
-
-	// Authentication
-	RequiresAuth() bool // Returns true if this handler requires authentication
-
-	// Authorization
-	ScopeGroups() [][]string // Returns scope requirement groups (OR within, AND across)
-	RoleGroups() [][]string  // Returns role requirement groups (OR within, AND across)
-
-	// Rate limiting
-	UsageLimits() []UsageLimit // Returns usage limit configuration
-
-	// Optional metadata for documentation
-	Summary() string
-	Description() string
-	Tags() []string
-
-	// OpenAPI generation metadata
-	PathParams() []string
-	QueryParams() []string
-	SuccessStatus() int
-	ErrorCodes() []int
-	InputSchema() *openapi.Schema  // Returns OpenAPI schema for request body
-	OutputSchema() *openapi.Schema // Returns OpenAPI schema for response body
-	InputTypeName() string         // Returns the Go type name for request body
-	OutputTypeName() string        // Returns the Go type name for response body
 
 	// Lifecycle
 	Close() error
