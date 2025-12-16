@@ -66,7 +66,7 @@ When using rocco in your applications, we recommend:
    - Handle context cancellation in your handlers
 
 3. **Error Handling**
-   - Declare all sentinel errors with WithErrorCodes
+   - Declare all sentinel errors with WithErrors
    - Never ignore errors from handler processing
    - Implement proper fallback mechanisms
 
@@ -79,6 +79,115 @@ When using rocco in your applications, we recommend:
    - Set appropriate timeouts for handlers
    - Implement rate limiting middleware
    - Use circuit breakers for external services
+
+## Production Security Guide
+
+### HTTPS
+
+Rocco does not handle TLS directly. In production, use one of these approaches:
+
+1. **Reverse Proxy** (Recommended): Use nginx, Caddy, or a cloud load balancer to terminate TLS
+2. **TLS in Go**: Wrap the server with `http.ListenAndServeTLS()` (not directly supported by rocco)
+
+```go
+// Example: Using behind nginx/Caddy that handles TLS
+engine := rocco.NewEngine("127.0.0.1", 8080, extractIdentity)
+// nginx forwards https://api.example.com -> http://127.0.0.1:8080
+```
+
+### CORS
+
+Rocco doesn't include CORS middleware. Use Chi's cors middleware:
+
+```go
+import "github.com/go-chi/cors"
+
+engine := rocco.NewEngine("localhost", 8080, nil)
+engine.WithMiddleware(cors.Handler(cors.Options{
+    AllowedOrigins:   []string{"https://example.com"},
+    AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+    AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type"},
+    ExposedHeaders:   []string{"Link"},
+    AllowCredentials: true,
+    MaxAge:           300,
+}))
+```
+
+### Identity Extraction
+
+The `extractIdentity` callback is critical for security. Guidelines:
+
+```go
+func extractIdentity(ctx context.Context, r *http.Request) (rocco.Identity, error) {
+    // 1. Extract token from header
+    token := r.Header.Get("Authorization")
+    if token == "" {
+        return nil, errors.New("missing authorization header")
+    }
+
+    // 2. Validate token (JWT verification, session lookup, etc.)
+    claims, err := validateToken(strings.TrimPrefix(token, "Bearer "))
+    if err != nil {
+        return nil, err // Returns 401 Unauthorized
+    }
+
+    // 3. Return identity with scopes/roles for authorization
+    return &UserIdentity{
+        ID:     claims.Subject,
+        Scopes: claims.Scopes,
+        Roles:  claims.Roles,
+    }, nil
+}
+```
+
+**Important:**
+- Never trust client-provided identity claims without verification
+- Use constant-time comparison for token validation
+- Set reasonable token expiration times
+- Log authentication failures for security monitoring
+
+### Request Size Limits
+
+Rocco enforces a 10MB default body size limit. Adjust per-handler:
+
+```go
+handler.WithMaxBodySize(1 * 1024 * 1024) // 1MB limit
+```
+
+Requests exceeding the limit return 413 Payload Too Large.
+
+### Rate Limiting
+
+Implement rate limiting at the middleware level:
+
+```go
+import "github.com/go-chi/httprate"
+
+engine.WithMiddleware(httprate.LimitByIP(100, time.Minute))
+```
+
+Or use rocco's built-in usage limits for authenticated routes:
+
+```go
+handler.WithUsageLimit("api_calls", func(id rocco.Identity) int {
+    if id.HasRole("premium") {
+        return 10000
+    }
+    return 100
+})
+```
+
+### SQL Injection Prevention
+
+Rocco validates JSON input but doesn't protect against SQL injection. Always use parameterized queries:
+
+```go
+// WRONG - vulnerable
+db.Query("SELECT * FROM users WHERE id = " + req.Params.Path["id"])
+
+// CORRECT - parameterized
+db.Query("SELECT * FROM users WHERE id = $1", req.Params.Path["id"])
+```
 
 ## Security Features
 

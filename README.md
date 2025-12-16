@@ -49,8 +49,9 @@ type UserOutput struct {
 }
 
 func main() {
-    // Create engine
-    engine := rocco.NewEngine(rocco.DefaultConfig())
+    // Create engine (host, port, identity extractor)
+    // Pass nil for identity extractor if not using authentication
+    engine := rocco.NewEngine("", 8080, nil)
 
     // Register handler
     handler := rocco.NewHandler[CreateUserInput, UserOutput](
@@ -70,7 +71,7 @@ func main() {
         WithDescription("Creates a new user account").
         WithTags("users").
         WithSuccessStatus(201).
-        WithErrorCodes(400, 422)
+        WithErrors(rocco.ErrBadRequest, rocco.ErrUnprocessableEntity)
 
     engine.WithHandlers(handler)
 
@@ -153,32 +154,58 @@ type CreateUserInput struct {
 
 ### Error Handling
 
-Use sentinel errors for HTTP error responses:
+Use sentinel errors for HTTP error responses. Errors are typed with generic details for comprehensive OpenAPI generation:
 
 ```go
 func(req *rocco.Request[GetUserInput]) (UserOutput, error) {
     user, err := db.GetUser(req.Params.Path["id"])
     if err != nil {
-        // Return sentinel error for 404
+        // Simple sentinel error
         return UserOutput{}, rocco.ErrNotFound
+
+        // With custom message
+        return UserOutput{}, rocco.ErrNotFound.WithMessage("user not found")
+
+        // With typed details (for OpenAPI schema generation)
+        return UserOutput{}, rocco.ErrNotFound.WithDetails(rocco.NotFoundDetails{
+            Resource: "user",
+        })
     }
     return UserOutput{...}, nil
 }
 
-// Must declare error codes in handler
-handler.WithErrorCodes(404)
+// Must declare errors in handler
+handler.WithErrors(rocco.ErrNotFound)
 ```
 
-Available sentinel errors:
-- `ErrBadRequest` (400)
-- `ErrUnauthorized` (401)
-- `ErrForbidden` (403)
-- `ErrNotFound` (404)
-- `ErrConflict` (409)
-- `ErrUnprocessableEntity` (422)
-- `ErrTooManyRequests` (429)
+Available sentinel errors (all with typed details for OpenAPI):
+- `ErrBadRequest` (400) - `BadRequestDetails`
+- `ErrUnauthorized` (401) - `UnauthorizedDetails`
+- `ErrForbidden` (403) - `ForbiddenDetails`
+- `ErrNotFound` (404) - `NotFoundDetails`
+- `ErrConflict` (409) - `ConflictDetails`
+- `ErrPayloadTooLarge` (413) - `PayloadTooLargeDetails`
+- `ErrUnprocessableEntity` (422) - `UnprocessableEntityDetails`
+- `ErrValidationFailed` (422) - `ValidationDetails`
+- `ErrTooManyRequests` (429) - `TooManyRequestsDetails`
+- `ErrInternalServer` (500) - `InternalServerDetails`
+- `ErrNotImplemented` (501) - `NotImplementedDetails`
+- `ErrServiceUnavailable` (503) - `ServiceUnavailableDetails`
 
-**Important**: You must declare error codes with `WithErrorCodes()`. Undeclared sentinel errors will return 500 and log an error.
+**Defining Custom Errors:**
+
+```go
+type TeapotDetails struct {
+    TeaType string `json:"tea_type" description:"The type of tea"`
+}
+
+var ErrTeapot = rocco.NewError[TeapotDetails]("TEAPOT", 418, "I'm a teapot")
+
+// Use in handler
+return Output{}, ErrTeapot.WithDetails(TeapotDetails{TeaType: "Earl Grey"})
+```
+
+**Important**: You must declare errors with `WithErrors()`. Undeclared sentinel errors will return 500 and log an error.
 
 ### Middleware
 
@@ -189,7 +216,7 @@ import (
     "github.com/go-chi/chi/v5/middleware"
 )
 
-engine := rocco.NewEngine(rocco.DefaultConfig())
+engine := rocco.NewEngine("", 8080, nil)
 
 // Engine-level middleware (applies to all handlers)
 engine.WithMiddleware(middleware.Logger)
@@ -359,18 +386,20 @@ All events and keys are exported constants in the `rocco` package for type-safe 
 
 ### Configuration
 
-Customize engine behavior:
+Create an engine with host, port, and identity extractor:
 
 ```go
-config := rocco.NewEngineConfig().
-    WithHost("0.0.0.0").
-    WithPort(3000).
-    WithReadTimeout(10 * time.Second).
-    WithWriteTimeout(10 * time.Second).
-    WithIdleTimeout(60 * time.Second)
+// Basic engine on all interfaces, port 8080, no auth
+engine := rocco.NewEngine("", 8080, nil)
 
-engine := rocco.NewEngine(config)
+// Engine on specific host/port with auth
+engine := rocco.NewEngine("0.0.0.0", 3000, extractIdentity)
 ```
+
+The engine uses these default timeouts:
+- ReadTimeout: 120 seconds
+- WriteTimeout: 120 seconds
+- IdleTimeout: 120 seconds
 
 ### Graceful Shutdown
 
@@ -391,10 +420,6 @@ if err := engine.Shutdown(ctx); err != nil {
     log.Fatal(err)
 }
 ```
-
-## Examples
-
-See the `examples/` directory for complete working examples (coming soon).
 
 ## Development
 

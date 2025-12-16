@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -82,7 +83,7 @@ func TestHandler_WithBuilderMethods(t *testing.T) {
 		WithPathParams("id").
 		WithQueryParams("page", "limit").
 		WithResponseHeaders(map[string]string{"X-Custom": "value"}).
-		WithErrorCodes(400, 404)
+		WithErrors(ErrBadRequest, ErrNotFound)
 
 	spec := handler.Spec()
 	if spec.Summary != "Test summary" {
@@ -201,7 +202,7 @@ func TestHandler_Process_DeclaredSentinelError(t *testing.T) {
 		func(_ *Request[NoBody]) (testOutput, error) {
 			return testOutput{}, ErrNotFound
 		},
-	).WithErrorCodes(404)
+	).WithErrors(ErrNotFound)
 
 	req := httptest.NewRequest("GET", "/test", nil)
 	w := httptest.NewRecorder()
@@ -218,8 +219,11 @@ func TestHandler_Process_DeclaredSentinelError(t *testing.T) {
 
 	var resp map[string]string
 	json.Unmarshal(w.Body.Bytes(), &resp)
-	if resp["error"] != "Not Found" {
-		t.Errorf("expected error message 'Not Found', got %q", resp["error"])
+	if resp["code"] != "NOT_FOUND" {
+		t.Errorf("expected error code 'NOT_FOUND', got %q", resp["code"])
+	}
+	if resp["message"] != "not found" {
+		t.Errorf("expected error message 'not found', got %q", resp["message"])
 	}
 }
 
@@ -231,7 +235,7 @@ func TestHandler_Process_UndeclaredSentinelError(t *testing.T) {
 		func(_ *Request[NoBody]) (testOutput, error) {
 			return testOutput{}, ErrNotFound
 		},
-	) // No WithErrorCodes() - undeclared
+	) // No WithErrors() - undeclared
 
 	req := httptest.NewRequest("GET", "/test", nil)
 	w := httptest.NewRecorder()
@@ -242,8 +246,12 @@ func TestHandler_Process_UndeclaredSentinelError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for undeclared sentinel")
 	}
-	if !errors.Is(err, ErrNotFound) {
-		t.Errorf("error should wrap ErrNotFound, got %v", err)
+	// Error message should indicate the undeclared error
+	if !strings.Contains(err.Error(), "undeclared error") {
+		t.Errorf("error should mention undeclared error, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "NOT_FOUND") {
+		t.Errorf("error should mention NOT_FOUND, got %v", err)
 	}
 	if w.Code != 500 {
 		t.Errorf("expected status 500, got %d", w.Code)
@@ -368,48 +376,32 @@ func TestHandler_ExtractParams_MissingQueryParam(t *testing.T) {
 	}
 }
 
-func TestMapSentinelToStatus(t *testing.T) {
+func TestGetRoccoError(t *testing.T) {
 	tests := []struct {
-		err    error
-		status int
-	}{
-		{ErrBadRequest, 400},
-		{ErrUnauthorized, 401},
-		{ErrForbidden, 403},
-		{ErrNotFound, 404},
-		{ErrConflict, 409},
-		{ErrUnprocessableEntity, 422},
-		{ErrTooManyRequests, 429},
-		{errors.New("unknown"), 500},
-	}
-
-	for _, tt := range tests {
-		t.Run(fmt.Sprintf("%v->%d", tt.err, tt.status), func(t *testing.T) {
-			status := mapSentinelToStatus(tt.err)
-			if status != tt.status {
-				t.Errorf("expected status %d, got %d", tt.status, status)
-			}
-		})
-	}
-}
-
-func TestIsSentinelError(t *testing.T) {
-	tests := []struct {
+		name     string
 		err      error
-		expected bool
+		expected ErrorDefinition
 	}{
-		{ErrBadRequest, true},
-		{ErrNotFound, true},
-		{ErrUnauthorized, true},
-		{errors.New("random error"), false},
-		{nil, false},
+		{"ErrBadRequest", ErrBadRequest, ErrBadRequest},
+		{"ErrNotFound", ErrNotFound, ErrNotFound},
+		{"ErrNotFound with message", ErrNotFound.WithMessage("custom"), ErrNotFound},
+		{"plain error", errors.New("random error"), nil},
+		{"nil", nil, nil},
 	}
 
 	for _, tt := range tests {
-		t.Run(fmt.Sprintf("%v", tt.err), func(t *testing.T) {
-			result := isSentinelError(tt.err)
-			if result != tt.expected {
-				t.Errorf("expected %v, got %v", tt.expected, result)
+		t.Run(tt.name, func(t *testing.T) {
+			result := getRoccoError(tt.err)
+			if tt.expected == nil {
+				if result != nil {
+					t.Errorf("expected nil, got %v", result)
+				}
+			} else {
+				if result == nil {
+					t.Errorf("expected non-nil, got nil")
+				} else if result.Code() != tt.expected.Code() {
+					t.Errorf("expected code %s, got %s", tt.expected.Code(), result.Code())
+				}
 			}
 		})
 	}
@@ -446,8 +438,11 @@ func TestHandler_ValidationInput(t *testing.T) {
 
 	var response map[string]any
 	json.Unmarshal(w.Body.Bytes(), &response)
-	if response["error"] != "Validation failed" {
-		t.Errorf("expected 'Validation failed', got %v", response["error"])
+	if response["code"] != "VALIDATION_FAILED" {
+		t.Errorf("expected code 'VALIDATION_FAILED', got %v", response["code"])
+	}
+	if response["message"] != "validation failed" {
+		t.Errorf("expected message 'validation failed', got %v", response["message"])
 	}
 }
 
@@ -464,7 +459,7 @@ func TestHandler_ValidationOutput(t *testing.T) {
 			// Return invalid output
 			return validatedOutput{Email: "notanemail"}, nil
 		},
-	)
+	).WithOutputValidation() // Opt-in to output validation for this test
 
 	req := httptest.NewRequest("GET", "/test", nil)
 	w := httptest.NewRecorder()
@@ -577,8 +572,15 @@ func TestHandler_Process_MaxBodySizeExceeded(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for body size exceeded")
 	}
-	if w.Code != 422 {
-		t.Errorf("expected status 422, got %d", w.Code)
+	if w.Code != http.StatusRequestEntityTooLarge {
+		t.Errorf("expected status 413, got %d", w.Code)
+	}
+
+	// Verify error response format
+	var response map[string]any
+	json.Unmarshal(w.Body.Bytes(), &response)
+	if response["code"] != "PAYLOAD_TOO_LARGE" {
+		t.Errorf("expected code 'PAYLOAD_TOO_LARGE', got %v", response["code"])
 	}
 }
 
@@ -635,5 +637,190 @@ func TestHandler_Process_ResponseHeaders(t *testing.T) {
 	}
 	if w.Header().Get("Content-Type") != "application/json" {
 		t.Errorf("expected Content-Type 'application/json', got %q", w.Header().Get("Content-Type"))
+	}
+}
+
+func TestHandler_WithAuthentication(t *testing.T) {
+	handler := NewHandler[NoBody, testOutput](
+		"test",
+		"GET",
+		"/test",
+		func(_ *Request[NoBody]) (testOutput, error) {
+			return testOutput{}, nil
+		},
+	)
+
+	// Verify default is false
+	spec := handler.Spec()
+	if spec.RequiresAuth {
+		t.Error("expected RequiresAuth to be false by default")
+	}
+
+	// Test WithAuthentication sets RequiresAuth to true
+	handler.WithAuthentication()
+	spec = handler.Spec()
+	if !spec.RequiresAuth {
+		t.Error("expected RequiresAuth to be true after WithAuthentication()")
+	}
+}
+
+func TestHandler_WithAuthentication_Chaining(t *testing.T) {
+	handler := NewHandler[NoBody, testOutput](
+		"test",
+		"GET",
+		"/test",
+		func(_ *Request[NoBody]) (testOutput, error) {
+			return testOutput{}, nil
+		},
+	).WithAuthentication().WithSummary("Test")
+
+	spec := handler.Spec()
+	if !spec.RequiresAuth {
+		t.Error("expected RequiresAuth to be true")
+	}
+	if spec.Summary != "Test" {
+		t.Errorf("expected Summary 'Test', got %q", spec.Summary)
+	}
+}
+
+func TestHandler_WithScopes(t *testing.T) {
+	handler := NewHandler[NoBody, testOutput](
+		"test",
+		"GET",
+		"/test",
+		func(_ *Request[NoBody]) (testOutput, error) {
+			return testOutput{}, nil
+		},
+	).WithScopes("read", "write")
+
+	spec := handler.Spec()
+
+	// WithScopes should implicitly set RequiresAuth
+	if !spec.RequiresAuth {
+		t.Error("expected RequiresAuth to be true after WithScopes()")
+	}
+
+	// Check scopes are set correctly
+	if len(spec.ScopeGroups) != 1 {
+		t.Fatalf("expected 1 scope group, got %d", len(spec.ScopeGroups))
+	}
+	if len(spec.ScopeGroups[0]) != 2 {
+		t.Errorf("expected 2 scopes in group, got %d", len(spec.ScopeGroups[0]))
+	}
+	if spec.ScopeGroups[0][0] != "read" || spec.ScopeGroups[0][1] != "write" {
+		t.Errorf("expected scopes [read, write], got %v", spec.ScopeGroups[0])
+	}
+}
+
+func TestHandler_WithScopes_MultipleGroups(t *testing.T) {
+	handler := NewHandler[NoBody, testOutput](
+		"test",
+		"GET",
+		"/test",
+		func(_ *Request[NoBody]) (testOutput, error) {
+			return testOutput{}, nil
+		},
+	).WithScopes("read").WithScopes("admin")
+
+	spec := handler.Spec()
+
+	// Multiple calls should create AND logic (multiple groups)
+	if len(spec.ScopeGroups) != 2 {
+		t.Fatalf("expected 2 scope groups, got %d", len(spec.ScopeGroups))
+	}
+	if spec.ScopeGroups[0][0] != "read" {
+		t.Errorf("expected first group to contain 'read', got %v", spec.ScopeGroups[0])
+	}
+	if spec.ScopeGroups[1][0] != "admin" {
+		t.Errorf("expected second group to contain 'admin', got %v", spec.ScopeGroups[1])
+	}
+}
+
+func TestHandler_WithScopes_EmptyDoesNothing(t *testing.T) {
+	handler := NewHandler[NoBody, testOutput](
+		"test",
+		"GET",
+		"/test",
+		func(_ *Request[NoBody]) (testOutput, error) {
+			return testOutput{}, nil
+		},
+	).WithScopes()
+
+	spec := handler.Spec()
+
+	// Empty WithScopes should not set RequiresAuth or add groups
+	if spec.RequiresAuth {
+		t.Error("expected RequiresAuth to remain false with empty WithScopes()")
+	}
+	if len(spec.ScopeGroups) != 0 {
+		t.Errorf("expected 0 scope groups, got %d", len(spec.ScopeGroups))
+	}
+}
+
+func TestHandler_WithRoles(t *testing.T) {
+	handler := NewHandler[NoBody, testOutput](
+		"test",
+		"GET",
+		"/test",
+		func(_ *Request[NoBody]) (testOutput, error) {
+			return testOutput{}, nil
+		},
+	).WithRoles("admin", "moderator")
+
+	spec := handler.Spec()
+
+	// WithRoles should implicitly set RequiresAuth
+	if !spec.RequiresAuth {
+		t.Error("expected RequiresAuth to be true after WithRoles()")
+	}
+
+	// Check roles are set correctly
+	if len(spec.RoleGroups) != 1 {
+		t.Fatalf("expected 1 role group, got %d", len(spec.RoleGroups))
+	}
+	if len(spec.RoleGroups[0]) != 2 {
+		t.Errorf("expected 2 roles in group, got %d", len(spec.RoleGroups[0]))
+	}
+	if spec.RoleGroups[0][0] != "admin" || spec.RoleGroups[0][1] != "moderator" {
+		t.Errorf("expected roles [admin, moderator], got %v", spec.RoleGroups[0])
+	}
+}
+
+func TestHandler_WithRoles_MultipleGroups(t *testing.T) {
+	handler := NewHandler[NoBody, testOutput](
+		"test",
+		"GET",
+		"/test",
+		func(_ *Request[NoBody]) (testOutput, error) {
+			return testOutput{}, nil
+		},
+	).WithRoles("admin").WithRoles("verified")
+
+	spec := handler.Spec()
+
+	// Multiple calls should create AND logic (multiple groups)
+	if len(spec.RoleGroups) != 2 {
+		t.Fatalf("expected 2 role groups, got %d", len(spec.RoleGroups))
+	}
+}
+
+func TestHandler_WithRoles_EmptyDoesNothing(t *testing.T) {
+	handler := NewHandler[NoBody, testOutput](
+		"test",
+		"GET",
+		"/test",
+		func(_ *Request[NoBody]) (testOutput, error) {
+			return testOutput{}, nil
+		},
+	).WithRoles()
+
+	spec := handler.Spec()
+
+	// Empty WithRoles should not set RequiresAuth or add groups
+	if spec.RequiresAuth {
+		t.Error("expected RequiresAuth to remain false with empty WithRoles()")
+	}
+	if len(spec.RoleGroups) != 0 {
+		t.Errorf("expected 0 role groups, got %d", len(spec.RoleGroups))
 	}
 }

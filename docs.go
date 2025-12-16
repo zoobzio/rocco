@@ -477,6 +477,19 @@ func statusCodeToResponseName(code int) string {
 	}
 }
 
+// errorCodeToSchemaName converts an error code like "NOT_FOUND" to "NotFound"
+func errorCodeToSchemaName(code string) string {
+	parts := strings.Split(code, "_")
+	var result strings.Builder
+	for _, part := range parts {
+		if part != "" {
+			result.WriteString(strings.ToUpper(part[:1]))
+			result.WriteString(strings.ToLower(part[1:]))
+		}
+	}
+	return result.String()
+}
+
 // setOperationForMethod sets the operation on the correct method field of PathItem
 func setOperationForMethod(pathItem *openapi.PathItem, method string, operation *openapi.Operation) {
 	switch method {
@@ -579,85 +592,23 @@ func (e *Engine) GenerateOpenAPI(identity Identity) *openapi.OpenAPI {
 		}
 	}
 
-	// Add standard error responses to components
-	spec.Components.Responses["BadRequest"] = &openapi.Response{
-		Description: "Bad Request",
-		Content: map[string]openapi.MediaType{
-			"application/json": {
-				Schema: &openapi.Schema{
-					Type: "object",
-					Properties: map[string]*openapi.Schema{
-						"error": {Type: "string"},
-					},
-					Required: []string{"error"},
-				},
-			},
-		},
-	}
-	spec.Components.Responses["Unauthorized"] = &openapi.Response{
-		Description: "Unauthorized",
-		Content: map[string]openapi.MediaType{
-			"application/json": {
-				Schema: &openapi.Schema{Ref: "#/components/schemas/ErrorResponse"},
-			},
-		},
-	}
-	spec.Components.Responses["Forbidden"] = &openapi.Response{
-		Description: "Forbidden",
-		Content: map[string]openapi.MediaType{
-			"application/json": {
-				Schema: &openapi.Schema{Ref: "#/components/schemas/ErrorResponse"},
-			},
-		},
-	}
-	spec.Components.Responses["NotFound"] = &openapi.Response{
-		Description: "Not Found",
-		Content: map[string]openapi.MediaType{
-			"application/json": {
-				Schema: &openapi.Schema{Ref: "#/components/schemas/ErrorResponse"},
-			},
-		},
-	}
-	spec.Components.Responses["Conflict"] = &openapi.Response{
-		Description: "Conflict",
-		Content: map[string]openapi.MediaType{
-			"application/json": {
-				Schema: &openapi.Schema{Ref: "#/components/schemas/ErrorResponse"},
-			},
-		},
-	}
-	spec.Components.Responses["UnprocessableEntity"] = &openapi.Response{
-		Description: "Unprocessable Entity",
-		Content: map[string]openapi.MediaType{
-			"application/json": {
-				Schema: &openapi.Schema{Ref: "#/components/schemas/ErrorResponse"},
-			},
-		},
-	}
-	spec.Components.Responses["TooManyRequests"] = &openapi.Response{
-		Description: "Too Many Requests",
-		Content: map[string]openapi.MediaType{
-			"application/json": {
-				Schema: &openapi.Schema{Ref: "#/components/schemas/ErrorResponse"},
-			},
-		},
-	}
-	spec.Components.Responses["InternalServerError"] = &openapi.Response{
-		Description: "Internal Server Error",
-		Content: map[string]openapi.MediaType{
-			"application/json": {
-				Schema: &openapi.Schema{Ref: "#/components/schemas/ErrorResponse"},
-			},
-		},
+	// Collect all unique error definitions from handlers for schema generation
+	errorDefs := make(map[string]ErrorDefinition) // keyed by error code
+	for _, handler := range e.handlers {
+		for _, errDef := range handler.ErrorDefs() {
+			errorDefs[errDef.Code()] = errDef
+		}
 	}
 
-	// Add ErrorResponse schema
+	// Add base ErrorResponse schema (used for untyped errors like 500)
 	spec.Components.Schemas["ErrorResponse"] = &openapi.Schema{
 		Type: "object",
 		Properties: map[string]*openapi.Schema{
-			"error": {Type: "string"},
+			"code":    {Type: "string", Description: "Machine-readable error code"},
+			"message": {Type: "string", Description: "Human-readable error message"},
+			"details": {Type: "object", Description: "Optional additional error details"},
 		},
-		Required: []string{"error"},
+		Required: []string{"code", "message"},
 	}
 
 	// Track unique schemas to add to components
@@ -682,6 +633,34 @@ func (e *Engine) GenerateOpenAPI(identity Identity) *openapi.OpenAPI {
 			if relMeta, found := sentinel.Lookup(rel.To); found {
 				collectSchemas(relMeta)
 			}
+		}
+	}
+
+	// Generate typed error response schemas from collected error definitions
+	for code, errDef := range errorDefs {
+		detailsMeta := errDef.DetailsMeta()
+		schemaName := errorCodeToSchemaName(code) + "ErrorResponse"
+
+		// Build properties for the error response
+		properties := map[string]*openapi.Schema{
+			"code":    {Type: "string", Description: "Machine-readable error code"},
+			"message": {Type: "string", Description: "Human-readable error message"},
+		}
+
+		// Add typed details if the error has a details type
+		if detailsMeta.TypeName != "" && detailsMeta.TypeName != "NoDetails" {
+			// Collect the details schema
+			collectSchemas(detailsMeta)
+			properties["details"] = &openapi.Schema{
+				Ref: "#/components/schemas/" + detailsMeta.TypeName,
+			}
+		}
+
+		// Create the typed error response schema
+		spec.Components.Schemas[schemaName] = &openapi.Schema{
+			Type:       "object",
+			Properties: properties,
+			Required:   []string{"code", "message"},
 		}
 	}
 
@@ -761,14 +740,14 @@ func (e *Engine) GenerateOpenAPI(identity Identity) *openapi.OpenAPI {
 			},
 		}
 
-		// Add error responses
-		for _, errorCode := range handlerSpec.ErrorCodes {
-			responseName := statusCodeToResponseName(errorCode)
-			operation.Responses[fmt.Sprintf("%d", errorCode)] = openapi.Response{
-				Description: responseName,
+		// Add error responses from handler's declared error definitions
+		for _, errDef := range handler.ErrorDefs() {
+			schemaName := errorCodeToSchemaName(errDef.Code()) + "ErrorResponse"
+			operation.Responses[fmt.Sprintf("%d", errDef.Status())] = openapi.Response{
+				Description: statusCodeToResponseName(errDef.Status()),
 				Content: map[string]openapi.MediaType{
 					"application/json": {
-						Schema: &openapi.Schema{Ref: "#/components/schemas/ErrorResponse"},
+						Schema: &openapi.Schema{Ref: "#/components/schemas/" + schemaName},
 					},
 				},
 			}

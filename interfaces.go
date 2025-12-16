@@ -14,6 +14,10 @@ type Endpoint interface {
 	// Spec returns the declarative specification for this handler
 	Spec() HandlerSpec
 
+	// ErrorDefs returns the declared error definitions for this handler.
+	// Used by OpenAPI generation to extract error schemas.
+	ErrorDefs() []ErrorDefinition
+
 	// Middleware returns handler-specific middleware
 	Middleware() []func(http.Handler) http.Handler
 

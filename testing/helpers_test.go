@@ -1,0 +1,232 @@
+package testing
+
+import (
+	"bytes"
+	"context"
+	"net/http"
+	"testing"
+
+	"github.com/zoobzio/rocco"
+)
+
+func TestResponseCapture(t *testing.T) {
+	capture := NewResponseCapture()
+	capture.WriteHeader(http.StatusCreated)
+	capture.Write([]byte(`{"message":"test"}`))
+
+	if capture.StatusCode() != http.StatusCreated {
+		t.Errorf("expected status 201, got %d", capture.StatusCode())
+	}
+
+	if capture.BodyString() != `{"message":"test"}` {
+		t.Errorf("unexpected body: %s", capture.BodyString())
+	}
+
+	var resp struct {
+		Message string `json:"message"`
+	}
+	if err := capture.DecodeJSON(&resp); err != nil {
+		t.Fatalf("failed to decode JSON: %v", err)
+	}
+	if resp.Message != "test" {
+		t.Errorf("expected message 'test', got %q", resp.Message)
+	}
+}
+
+func TestResponseCapture_ContentType(t *testing.T) {
+	capture := NewResponseCapture()
+	capture.Header().Set("Content-Type", "application/json")
+	capture.WriteHeader(http.StatusOK)
+
+	if capture.ContentType() != "application/json" {
+		t.Errorf("expected content-type 'application/json', got %q", capture.ContentType())
+	}
+}
+
+func TestRequestBuilder(t *testing.T) {
+	req := NewRequestBuilder("POST", "/users").
+		WithHeader("Authorization", "Bearer token").
+		WithHeader("X-Custom", "value").
+		Build()
+
+	if req.Method != "POST" {
+		t.Errorf("expected method POST, got %s", req.Method)
+	}
+	if req.URL.Path != "/users" {
+		t.Errorf("expected path /users, got %s", req.URL.Path)
+	}
+	if req.Header.Get("Authorization") != "Bearer token" {
+		t.Errorf("expected Authorization header, got %q", req.Header.Get("Authorization"))
+	}
+	if req.Header.Get("X-Custom") != "value" {
+		t.Errorf("expected X-Custom header, got %q", req.Header.Get("X-Custom"))
+	}
+}
+
+func TestRequestBuilder_WithJSON(t *testing.T) {
+	type input struct {
+		Name string `json:"name"`
+	}
+
+	req := NewRequestBuilder("POST", "/users").
+		WithJSON(input{Name: "test"}).
+		Build()
+
+	body := make([]byte, 100)
+	n, _ := req.Body.Read(body)
+
+	if string(body[:n]) != `{"name":"test"}` {
+		t.Errorf("unexpected body: %s", string(body[:n]))
+	}
+}
+
+func TestRequestBuilder_WithBody(t *testing.T) {
+	req := NewRequestBuilder("POST", "/data").
+		WithBody(bytes.NewReader([]byte("raw data"))).
+		Build()
+
+	body := make([]byte, 100)
+	n, _ := req.Body.Read(body)
+
+	if string(body[:n]) != "raw data" {
+		t.Errorf("unexpected body: %s", string(body[:n]))
+	}
+}
+
+func TestRequestBuilder_WithContext(t *testing.T) {
+	type contextKey string
+	key := contextKey("test")
+	ctx := context.WithValue(context.Background(), key, "value")
+
+	req := NewRequestBuilder("GET", "/test").
+		WithContext(ctx).
+		Build()
+
+	if req.Context().Value(key) != "value" {
+		t.Error("context value not preserved")
+	}
+}
+
+func TestMockIdentity(t *testing.T) {
+	identity := NewMockIdentity("user-123").
+		WithTenantID("tenant-456").
+		WithScopes("read", "write").
+		WithRoles("admin", "user").
+		WithStat("requests", 100)
+
+	if identity.ID() != "user-123" {
+		t.Errorf("expected ID 'user-123', got %q", identity.ID())
+	}
+	if identity.TenantID() != "tenant-456" {
+		t.Errorf("expected TenantID 'tenant-456', got %q", identity.TenantID())
+	}
+
+	if !identity.HasScope("read") {
+		t.Error("expected HasScope('read') to be true")
+	}
+	if !identity.HasScope("write") {
+		t.Error("expected HasScope('write') to be true")
+	}
+	if identity.HasScope("delete") {
+		t.Error("expected HasScope('delete') to be false")
+	}
+
+	if !identity.HasRole("admin") {
+		t.Error("expected HasRole('admin') to be true")
+	}
+	if identity.HasRole("superuser") {
+		t.Error("expected HasRole('superuser') to be false")
+	}
+
+	if identity.Stats()["requests"] != 100 {
+		t.Errorf("expected requests stat 100, got %d", identity.Stats()["requests"])
+	}
+}
+
+func TestMockIdentity_WithStats(t *testing.T) {
+	stats := map[string]int{
+		"requests":   100,
+		"api_calls":  50,
+		"rate_limit": 1000,
+	}
+
+	identity := NewMockIdentity("user").WithStats(stats)
+
+	if identity.Stats()["requests"] != 100 {
+		t.Errorf("expected requests 100, got %d", identity.Stats()["requests"])
+	}
+	if identity.Stats()["api_calls"] != 50 {
+		t.Errorf("expected api_calls 50, got %d", identity.Stats()["api_calls"])
+	}
+}
+
+func TestTestEngine(t *testing.T) {
+	engine := TestEngine()
+	if engine == nil {
+		t.Fatal("expected engine, got nil")
+	}
+}
+
+func TestTestEngineWithAuth(t *testing.T) {
+	identity := NewMockIdentity("test-user")
+	engine := TestEngineWithAuth(func(_ context.Context, _ *http.Request) (rocco.Identity, error) {
+		return identity, nil
+	})
+	if engine == nil {
+		t.Fatal("expected engine, got nil")
+	}
+}
+
+type testOutput struct {
+	Message string `json:"message"`
+}
+
+func TestServeRequest(t *testing.T) {
+	engine := TestEngine()
+
+	handler := rocco.NewHandler[rocco.NoBody, testOutput](
+		"test",
+		"GET",
+		"/test",
+		func(_ *rocco.Request[rocco.NoBody]) (testOutput, error) {
+			return testOutput{Message: "hello"}, nil
+		},
+	)
+	engine.WithHandlers(handler)
+
+	capture := ServeRequest(engine, "GET", "/test", nil)
+
+	if capture.StatusCode() != http.StatusOK {
+		t.Errorf("expected status 200, got %d", capture.StatusCode())
+	}
+
+	var resp testOutput
+	capture.DecodeJSON(&resp)
+	if resp.Message != "hello" {
+		t.Errorf("expected message 'hello', got %q", resp.Message)
+	}
+}
+
+func TestServeRequestWithHeaders(t *testing.T) {
+	engine := TestEngine()
+
+	handler := rocco.NewHandler[rocco.NoBody, testOutput](
+		"test",
+		"GET",
+		"/test",
+		func(req *rocco.Request[rocco.NoBody]) (testOutput, error) {
+			token := req.Request.Header.Get("Authorization")
+			return testOutput{Message: token}, nil
+		},
+	)
+	engine.WithHandlers(handler)
+
+	headers := map[string]string{"Authorization": "Bearer test-token"}
+	capture := ServeRequestWithHeaders(engine, "GET", "/test", nil, headers)
+
+	var resp testOutput
+	capture.DecodeJSON(&resp)
+	if resp.Message != "Bearer test-token" {
+		t.Errorf("expected message with token, got %q", resp.Message)
+	}
+}

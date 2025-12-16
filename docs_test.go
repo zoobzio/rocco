@@ -229,7 +229,7 @@ func TestGenerateOpenAPI(t *testing.T) {
 		func(req *Request[testInput]) (testOutput, error) {
 			return testOutput{}, nil
 		},
-	).WithSummary("Create test").WithTags("test").WithErrorCodes(400, 404)
+	).WithSummary("Create test").WithTags("test").WithErrors(ErrBadRequest, ErrNotFound)
 
 	engine.WithHandlers(handler1, handler2)
 
@@ -300,13 +300,18 @@ func TestGenerateOpenAPI(t *testing.T) {
 	if len(spec.Components.Schemas) == 0 {
 		t.Error("expected schemas in components")
 	}
-	if len(spec.Components.Responses) == 0 {
-		t.Error("expected responses in components")
-	}
 
-	// Check standard error response
+	// Check standard error response schema
 	if _, exists := spec.Components.Schemas["ErrorResponse"]; !exists {
 		t.Error("expected ErrorResponse schema")
+	}
+
+	// Check typed error schemas from declared errors
+	if _, exists := spec.Components.Schemas["BadRequestErrorResponse"]; !exists {
+		t.Error("expected BadRequestErrorResponse schema")
+	}
+	if _, exists := spec.Components.Schemas["NotFoundErrorResponse"]; !exists {
+		t.Error("expected NotFoundErrorResponse schema")
 	}
 }
 

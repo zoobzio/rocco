@@ -33,10 +33,14 @@ type Handler[In, Out any] struct {
 	// Runtime configuration
 	responseHeaders map[string]string // Default response headers.
 	maxBodySize     int64             // Maximum request body size in bytes (0 = unlimited, default: 10MB).
+	validateOutput  bool              // Whether to validate output structs (disabled by default).
 
 	// Type metadata from sentinel.
 	InputMeta  sentinel.ModelMetadata
 	OutputMeta sentinel.ModelMetadata
+
+	// Error definitions with schemas for OpenAPI generation.
+	errorDefs []ErrorDefinition
 
 	// Validation.
 	validator *validator.Validate
@@ -59,26 +63,37 @@ func (h *Handler[In, Out]) Process(ctx context.Context, r *http.Request, w http.
 			HandlerNameKey.Field(h.spec.Name),
 			ErrorKey.Field(err.Error()),
 		)
-		writeErrorResponse(w, http.StatusUnprocessableEntity)
+		writeError(w, ErrUnprocessableEntity.WithMessage("invalid parameters").WithCause(err))
 		return http.StatusUnprocessableEntity, err
 	}
 
 	// Parse request body.
 	var input In
 	if h.InputMeta.TypeName != "NoBody" && r.Body != nil {
-		// Limit body size if configured
-		var bodyReader io.Reader = r.Body
+		// Limit body size if configured - use MaxBytesReader for proper 413 errors
 		if h.maxBodySize > 0 {
-			bodyReader = io.LimitReader(r.Body, h.maxBodySize)
+			r.Body = http.MaxBytesReader(w, r.Body, h.maxBodySize)
 		}
 
-		body, readErr := io.ReadAll(bodyReader)
+		body, readErr := io.ReadAll(r.Body)
 		if readErr != nil {
+			// Check if this is a max bytes exceeded error
+			var maxBytesErr *http.MaxBytesError
+			if errors.As(readErr, &maxBytesErr) {
+				capitan.Warn(ctx, RequestBodyReadError,
+					HandlerNameKey.Field(h.spec.Name),
+					ErrorKey.Field("payload too large"),
+				)
+				writeError(w, ErrPayloadTooLarge.WithDetails(PayloadTooLargeDetails{
+					MaxSize: h.maxBodySize,
+				}))
+				return http.StatusRequestEntityTooLarge, readErr
+			}
 			capitan.Error(ctx, RequestBodyReadError,
 				HandlerNameKey.Field(h.spec.Name),
 				ErrorKey.Field(readErr.Error()),
 			)
-			writeErrorResponse(w, http.StatusBadRequest)
+			writeError(w, ErrBadRequest.WithMessage("failed to read request body").WithCause(readErr))
 			return http.StatusBadRequest, readErr
 		}
 		r.Body.Close()
@@ -89,7 +104,7 @@ func (h *Handler[In, Out]) Process(ctx context.Context, r *http.Request, w http.
 					HandlerNameKey.Field(h.spec.Name),
 					ErrorKey.Field(unmarshalErr.Error()),
 				)
-				writeErrorResponse(w, http.StatusUnprocessableEntity)
+				writeError(w, ErrUnprocessableEntity.WithMessage("invalid request body").WithCause(unmarshalErr))
 				return http.StatusUnprocessableEntity, unmarshalErr
 			}
 
@@ -125,49 +140,49 @@ func (h *Handler[In, Out]) Process(ctx context.Context, r *http.Request, w http.
 	// Call user handler.
 	output, err := h.fn(req)
 	if err != nil {
-		// Check if this is a sentinel error.
-		if isSentinelError(err) {
-			status := mapSentinelToStatus(err)
-
-			// Validate that this error code is declared.
-			if !h.isErrorCodeDeclared(status) {
-				// Undeclared sentinel error - programming error.
+		// Check if this is a rocco Error.
+		if e := getRoccoError(err); e != nil {
+			// Validate that this error is declared.
+			if !h.isErrorDeclared(e) {
+				// Undeclared error - programming error.
 				capitan.Warn(ctx, HandlerUndeclaredSentinel,
 					HandlerNameKey.Field(h.spec.Name),
 					ErrorKey.Field(err.Error()),
-					StatusCodeKey.Field(status),
+					StatusCodeKey.Field(e.Status()),
 				)
-				writeErrorResponse(w, http.StatusInternalServerError)
-				return http.StatusInternalServerError, fmt.Errorf("undeclared sentinel error %w (add %d to WithErrorCodes)", err, status)
+				writeError(w, ErrInternalServer)
+				return http.StatusInternalServerError, fmt.Errorf("undeclared error %s (add to WithErrors)", e.Code())
 			}
 
-			// Declared sentinel error - successful handling.
+			// Declared error - successful handling.
 			capitan.Warn(ctx, HandlerSentinelError,
 				HandlerNameKey.Field(h.spec.Name),
 				ErrorKey.Field(err.Error()),
-				StatusCodeKey.Field(status),
+				StatusCodeKey.Field(e.Status()),
 			)
-			writeErrorResponse(w, status)
-			return status, nil
+			writeError(w, e)
+			return e.Status(), nil
 		}
 
-		// Real error.
+		// Real unexpected error.
 		capitan.Error(ctx, HandlerError,
 			HandlerNameKey.Field(h.spec.Name),
 			ErrorKey.Field(err.Error()),
 		)
-		writeErrorResponse(w, http.StatusInternalServerError)
+		writeError(w, ErrInternalServer)
 		return http.StatusInternalServerError, err
 	}
 
-	// Validate output.
-	if validErr := h.validator.Struct(output); validErr != nil {
-		capitan.Warn(ctx, RequestValidationOutputFailed,
-			HandlerNameKey.Field(h.spec.Name),
-			ErrorKey.Field(validErr.Error()),
-		)
-		writeErrorResponse(w, http.StatusInternalServerError)
-		return http.StatusInternalServerError, fmt.Errorf("output validation failed: %w", validErr)
+	// Validate output (opt-in, disabled by default).
+	if h.validateOutput {
+		if validErr := h.validator.Struct(output); validErr != nil {
+			capitan.Warn(ctx, RequestValidationOutputFailed,
+				HandlerNameKey.Field(h.spec.Name),
+				ErrorKey.Field(validErr.Error()),
+			)
+			writeError(w, ErrInternalServer.WithCause(fmt.Errorf("output validation failed: %w", validErr)))
+			return http.StatusInternalServerError, fmt.Errorf("output validation failed: %w", validErr)
+		}
 	}
 
 	// Marshal response.
@@ -177,7 +192,7 @@ func (h *Handler[In, Out]) Process(ctx context.Context, r *http.Request, w http.
 			HandlerNameKey.Field(h.spec.Name),
 			ErrorKey.Field(err.Error()),
 		)
-		writeErrorResponse(w, http.StatusInternalServerError)
+		writeError(w, ErrInternalServer.WithCause(err))
 		return http.StatusInternalServerError, err
 	}
 
@@ -284,18 +299,36 @@ func (h *Handler[In, Out]) WithResponseHeaders(headers map[string]string) *Handl
 	return h
 }
 
-// WithErrorCodes declares which HTTP error status codes this handler may return.
-// Undeclared sentinel errors will be converted to 500 Internal Server Error.
-// This is used for OpenAPI documentation generation.
-func (h *Handler[In, Out]) WithErrorCodes(codes ...int) *Handler[In, Out] {
-	h.spec.ErrorCodes = codes
+// WithErrors declares which errors this handler may return.
+// Undeclared errors will be converted to 500 Internal Server Error.
+// This is used for OpenAPI documentation generation with proper error schemas.
+func (h *Handler[In, Out]) WithErrors(errs ...ErrorDefinition) *Handler[In, Out] {
+	h.errorDefs = append(h.errorDefs, errs...)
+	// Also populate ErrorCodes for spec serialization
+	for _, err := range errs {
+		h.spec.ErrorCodes = append(h.spec.ErrorCodes, err.Status())
+	}
 	return h
+}
+
+// ErrorDefs returns the declared error definitions for this handler.
+// Used by OpenAPI generation to extract error schemas.
+func (h *Handler[In, Out]) ErrorDefs() []ErrorDefinition {
+	return h.errorDefs
 }
 
 // WithMaxBodySize sets the maximum request body size in bytes for this handler.
 // Set to 0 for unlimited (not recommended for production).
 func (h *Handler[In, Out]) WithMaxBodySize(size int64) *Handler[In, Out] {
 	h.maxBodySize = size
+	return h
+}
+
+// WithOutputValidation enables validation of output structs before sending responses.
+// This is disabled by default for performance. Enable in development to catch bugs early.
+// Output validation failures return 500 Internal Server Error.
+func (h *Handler[In, Out]) WithOutputValidation() *Handler[In, Out] {
+	h.validateOutput = true
 	return h
 }
 
@@ -390,105 +423,63 @@ func (h *Handler[In, Out]) extractParams(ctx context.Context, r *http.Request) (
 	return params, nil
 }
 
-// isSentinelError checks if an error is one of our sentinel errors.
-// that indicate specific HTTP error status codes.
-func isSentinelError(err error) bool {
-	return errors.Is(err, ErrBadRequest) ||
-		errors.Is(err, ErrUnauthorized) ||
-		errors.Is(err, ErrForbidden) ||
-		errors.Is(err, ErrNotFound) ||
-		errors.Is(err, ErrConflict) ||
-		errors.Is(err, ErrUnprocessableEntity) ||
-		errors.Is(err, ErrTooManyRequests)
+// getRoccoError extracts a rocco ErrorDefinition from an error chain.
+// Returns nil if the error is not a rocco Error.
+func getRoccoError(err error) ErrorDefinition {
+	var e ErrorDefinition
+	if errors.As(err, &e) {
+		return e
+	}
+	return nil
 }
 
 // errorResponse represents the standard error response format.
-//
-//nolint:unused // Used indirectly via reflection in JSON marshaling
 type errorResponse struct {
-	Error string `json:"error"`
+	Code    string `json:"code"`
+	Message string `json:"message"`
+	Details any    `json:"details,omitempty"`
 }
 
-// Canned error responses - consistent across all handlers.
-var cannedErrorResponses = map[int][]byte{
-	http.StatusBadRequest:          []byte(`{"error":"Bad Request"}`),
-	http.StatusUnauthorized:        []byte(`{"error":"Unauthorized"}`),
-	http.StatusForbidden:           []byte(`{"error":"Forbidden"}`),
-	http.StatusNotFound:            []byte(`{"error":"Not Found"}`),
-	http.StatusConflict:            []byte(`{"error":"Conflict"}`),
-	http.StatusUnprocessableEntity: []byte(`{"error":"Unprocessable Entity"}`),
-	http.StatusTooManyRequests:     []byte(`{"error":"Too Many Requests"}`),
-	http.StatusInternalServerError: []byte(`{"error":"Internal Server Error"}`),
-}
-
-// mapSentinelToStatus maps sentinel errors to HTTP status codes.
-func mapSentinelToStatus(err error) int {
-	switch {
-	case errors.Is(err, ErrBadRequest):
-		return http.StatusBadRequest
-	case errors.Is(err, ErrUnauthorized):
-		return http.StatusUnauthorized
-	case errors.Is(err, ErrForbidden):
-		return http.StatusForbidden
-	case errors.Is(err, ErrNotFound):
-		return http.StatusNotFound
-	case errors.Is(err, ErrConflict):
-		return http.StatusConflict
-	case errors.Is(err, ErrUnprocessableEntity):
-		return http.StatusUnprocessableEntity
-	case errors.Is(err, ErrTooManyRequests):
-		return http.StatusTooManyRequests
-	default:
-		return http.StatusInternalServerError
-	}
-}
-
-// isErrorCodeDeclared checks if an error status code was declared via WithErrorCodes.
-func (h *Handler[In, Out]) isErrorCodeDeclared(status int) bool {
-	for _, code := range h.spec.ErrorCodes {
-		if code == status {
+// isErrorDeclared checks if an error was declared via WithErrors.
+// Matches by error code (e.g., "NOT_FOUND"), not just status code.
+func (h *Handler[In, Out]) isErrorDeclared(err ErrorDefinition) bool {
+	for _, declared := range h.errorDefs {
+		if declared.Code() == err.Code() {
 			return true
 		}
 	}
 	return false
 }
 
-// writeErrorResponse writes a canned JSON error response.
-func writeErrorResponse(w http.ResponseWriter, status int) {
-	body, exists := cannedErrorResponses[status]
-	if !exists {
-		body = cannedErrorResponses[http.StatusInternalServerError]
-		status = http.StatusInternalServerError
-	}
-
+// writeError writes a structured JSON error response.
+func writeError(w http.ResponseWriter, err ErrorDefinition) {
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	w.Write(body)
+	w.WriteHeader(err.Status())
+
+	//nolint:errchkjson // Standard practice after WriteHeader
+	json.NewEncoder(w).Encode(errorResponse{
+		Code:    err.Code(),
+		Message: err.Message(),
+		Details: err.DetailsAny(),
+	})
 }
 
-// writeValidationErrorResponse writes detailed validation errors.
+// writeValidationErrorResponse writes detailed validation errors using the standard error format.
 func writeValidationErrorResponse(w http.ResponseWriter, err error) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusUnprocessableEntity)
-
 	// Extract validation errors.
-	var validationErrors []map[string]string
+	var validationErrors []ValidationFieldError
 	var ve validator.ValidationErrors
 	if errors.As(err, &ve) {
 		for _, fe := range ve {
-			validationErrors = append(validationErrors, map[string]string{
-				"field": fe.Field(),
-				"tag":   fe.Tag(),
-				"value": fmt.Sprintf("%v", fe.Value()),
+			validationErrors = append(validationErrors, ValidationFieldError{
+				Field: fe.Field(),
+				Tag:   fe.Tag(),
+				Value: fmt.Sprintf("%v", fe.Value()),
 			})
 		}
 	}
 
-	response := map[string]any{
-		"error":  "Validation failed",
-		"fields": validationErrors,
-	}
-
-	//nolint:errchkjson // Standard practice after WriteHeader
-	json.NewEncoder(w).Encode(response)
+	writeError(w, ErrValidationFailed.WithDetails(ValidationDetails{
+		Fields: validationErrors,
+	}))
 }

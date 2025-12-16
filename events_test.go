@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -165,7 +166,7 @@ func TestEvents_RequestLifecycle_Failed(t *testing.T) {
 		"GET",
 		"/fail",
 		func(_ *Request[NoBody]) (testOutput, error) {
-			return testOutput{}, ErrInternalServer
+			return testOutput{}, errors.New("something went wrong")
 		},
 	)
 	engine.WithHandlers(handler)
@@ -177,8 +178,8 @@ func TestEvents_RequestLifecycle_Failed(t *testing.T) {
 	if !requestFailed {
 		t.Error("RequestFailed not emitted")
 	}
-	if !strings.Contains(errorMsg, "internal server") {
-		t.Errorf("expected error to contain 'internal server', got %q", errorMsg)
+	if !strings.Contains(errorMsg, "something went wrong") {
+		t.Errorf("expected error to contain 'something went wrong', got %q", errorMsg)
 	}
 }
 
@@ -270,7 +271,8 @@ func TestEvents_HandlerError(t *testing.T) {
 		"GET",
 		"/error",
 		func(_ *Request[NoBody]) (testOutput, error) {
-			return testOutput{}, ErrInternalServer
+			// Use a plain error (not a rocco Error) to trigger HandlerError event
+			return testOutput{}, errors.New("database connection failed")
 		},
 	)
 	engine.WithHandlers(handler)
@@ -309,7 +311,7 @@ func TestEvents_HandlerSentinelError(t *testing.T) {
 		func(_ *Request[NoBody]) (testOutput, error) {
 			return testOutput{}, ErrNotFound
 		},
-	).WithErrorCodes(http.StatusNotFound)
+	).WithErrors(ErrNotFound)
 	engine.WithHandlers(handler)
 
 	req := httptest.NewRequest("GET", "/sentinel", nil)
@@ -464,7 +466,7 @@ func TestEvents_RequestValidationOutputFailed(t *testing.T) {
 			// Return invalid email
 			return validatedOutput{Email: "not-an-email"}, nil
 		},
-	)
+	).WithOutputValidation() // Opt-in to output validation for this test
 	engine.WithHandlers(handler)
 
 	req := httptest.NewRequest("GET", "/output-validate", nil)

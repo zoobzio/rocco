@@ -25,6 +25,8 @@ type Engine struct {
 	cancel              context.CancelFunc
 	defaultHandlersOnce sync.Once
 	spec                *EngineSpec // OpenAPI specification configuration
+	cachedOpenAPISpec   []byte      // Cached JSON-encoded OpenAPI spec
+	openAPIOnce         sync.Once   // Ensures OpenAPI spec is generated only once
 }
 
 // NewEngine creates a new Engine with identity extraction.
@@ -122,6 +124,10 @@ func (e *Engine) Router() chi.Router {
 }
 
 // WithHandlers adds one or more Endpoints to the engine and returns the engine for chaining.
+//
+// Threading model: All handler registration must complete before calling Start().
+// Calling WithHandlers concurrently or after Start() results in undefined behavior.
+// This follows the standard Go pattern for HTTP server configuration.
 func (e *Engine) WithHandlers(handlers ...Endpoint) *Engine {
 	// Ensure default handlers are registered first (only once)
 	e.ensureDefaultHandlers()
@@ -186,7 +192,7 @@ func (e *Engine) buildAuthMiddleware() func(http.Handler) http.Handler {
 					PathKey.Field(r.URL.Path),
 					ErrorKey.Field(err.Error()),
 				)
-				writeErrorResponse(w, http.StatusUnauthorized)
+				writeError(w, ErrUnauthorized)
 				return
 			}
 
@@ -225,13 +231,13 @@ func (*Engine) buildAuthorizationMiddleware(handler Endpoint) func(http.Handler)
 			// Extract identity from context (should exist from auth middleware)
 			val := ctx.Value(identityContextKey)
 			if val == nil {
-				writeErrorResponse(w, http.StatusForbidden)
+				writeError(w, ErrForbidden.WithMessage("identity not found"))
 				return
 			}
 
 			identity, ok := val.(Identity)
 			if !ok {
-				writeErrorResponse(w, http.StatusForbidden)
+				writeError(w, ErrForbidden.WithMessage("invalid identity"))
 				return
 			}
 
@@ -252,7 +258,7 @@ func (*Engine) buildAuthorizationMiddleware(handler Endpoint) func(http.Handler)
 						IdentityIDKey.Field(identity.ID()),
 						RequiredScopesKey.Field(strings.Join(scopeGroup, ",")),
 					)
-					writeErrorResponse(w, http.StatusForbidden)
+					writeError(w, ErrForbidden.WithMessage("insufficient scope"))
 					return
 				}
 			}
@@ -274,7 +280,7 @@ func (*Engine) buildAuthorizationMiddleware(handler Endpoint) func(http.Handler)
 						IdentityIDKey.Field(identity.ID()),
 						RequiredRolesKey.Field(strings.Join(roleGroup, ",")),
 					)
-					writeErrorResponse(w, http.StatusForbidden)
+					writeError(w, ErrForbidden.WithMessage("insufficient role"))
 					return
 				}
 			}
@@ -302,13 +308,13 @@ func (*Engine) buildUsageLimitMiddleware(handler Endpoint) func(http.Handler) ht
 			// Extract identity from context (should exist from auth middleware)
 			val := ctx.Value(identityContextKey)
 			if val == nil {
-				writeErrorResponse(w, http.StatusForbidden)
+				writeError(w, ErrForbidden.WithMessage("identity not found"))
 				return
 			}
 
 			identity, ok := val.(Identity)
 			if !ok {
-				writeErrorResponse(w, http.StatusForbidden)
+				writeError(w, ErrForbidden.WithMessage("invalid identity"))
 				return
 			}
 
@@ -332,7 +338,7 @@ func (*Engine) buildUsageLimitMiddleware(handler Endpoint) func(http.Handler) ht
 						CurrentValueKey.Field(currentValue),
 						ThresholdKey.Field(threshold),
 					)
-					writeErrorResponse(w, http.StatusTooManyRequests)
+					writeError(w, ErrTooManyRequests)
 					return
 				}
 			}
@@ -354,19 +360,25 @@ func (e *Engine) ensureDefaultHandlers() {
 func (e *Engine) registerDefaultHandlers() {
 	// OpenAPI spec handler at /openapi
 	e.chiRouter.Get("/openapi", func(w http.ResponseWriter, _ *http.Request) {
-		spec := e.GenerateOpenAPI(nil)
+		// Generate and cache spec on first request (cached forever after)
+		e.openAPIOnce.Do(func() {
+			spec := e.GenerateOpenAPI(nil)
+			data, err := json.MarshalIndent(spec, "", "  ")
+			if err != nil {
+				// Marshal failure is a programming error - spec remains nil
+				return
+			}
+			e.cachedOpenAPISpec = data
+		})
 
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-
-		// Marshal to pretty-printed JSON.
-		data, err := json.MarshalIndent(spec, "", "  ")
-		if err != nil {
+		if e.cachedOpenAPISpec == nil {
 			http.Error(w, "failed to generate OpenAPI spec", http.StatusInternalServerError)
 			return
 		}
 
-		w.Write(data)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write(e.cachedOpenAPISpec)
 	})
 
 	// Docs handler at /docs
