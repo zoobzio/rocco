@@ -1064,6 +1064,22 @@ func TestGenerateOpenAPI_Filtering(t *testing.T) {
 	if _, exists := spec.Paths["/public"]; !exists {
 		t.Error("no permissions: expected /public to exist")
 	}
+
+	// Test: Identity with admin role - public + admin visible
+	adminIdentity := &mockIdentity{roles: []string{"admin"}}
+	spec = engine.GenerateOpenAPI(adminIdentity)
+	if len(spec.Paths) != 2 {
+		t.Errorf("admin identity: expected 2 paths, got %d", len(spec.Paths))
+	}
+	if _, exists := spec.Paths["/public"]; !exists {
+		t.Error("admin identity: expected /public to exist")
+	}
+	if _, exists := spec.Paths["/admin"]; !exists {
+		t.Error("admin identity: expected /admin to exist")
+	}
+	if _, exists := spec.Paths["/read"]; exists {
+		t.Error("admin identity: expected /read to NOT exist (needs read scope)")
+	}
 }
 
 // TestGenerateOpenAPI_WithTags tests engine-level tag descriptions

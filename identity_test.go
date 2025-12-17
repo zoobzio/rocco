@@ -441,6 +441,53 @@ func TestAuthz_NoIdentityInContext(t *testing.T) {
 	}
 }
 
+// TestNoIdentity tests the NoIdentity type methods.
+func TestNoIdentity(t *testing.T) {
+	var identity NoIdentity
+
+	t.Run("ID returns empty string", func(t *testing.T) {
+		if identity.ID() != "" {
+			t.Errorf("expected empty string, got %q", identity.ID())
+		}
+	})
+
+	t.Run("TenantID returns empty string", func(t *testing.T) {
+		if identity.TenantID() != "" {
+			t.Errorf("expected empty string, got %q", identity.TenantID())
+		}
+	})
+
+	t.Run("HasScope always returns false", func(t *testing.T) {
+		if identity.HasScope("read") {
+			t.Error("expected false for HasScope")
+		}
+		if identity.HasScope("") {
+			t.Error("expected false for HasScope with empty string")
+		}
+	})
+
+	t.Run("HasRole always returns false", func(t *testing.T) {
+		if identity.HasRole("admin") {
+			t.Error("expected false for HasRole")
+		}
+		if identity.HasRole("") {
+			t.Error("expected false for HasRole with empty string")
+		}
+	})
+
+	t.Run("Stats returns nil", func(t *testing.T) {
+		if identity.Stats() != nil {
+			t.Errorf("expected nil, got %v", identity.Stats())
+		}
+	})
+}
+
+// TestNoIdentity_ImplementsInterface verifies NoIdentity implements Identity.
+func TestNoIdentity_ImplementsInterface(t *testing.T) {
+	var _ Identity = NoIdentity{}
+	var _ Identity = &NoIdentity{}
+}
+
 // testIdentity is a test implementation of Identity.
 type testIdentity struct {
 	id       string

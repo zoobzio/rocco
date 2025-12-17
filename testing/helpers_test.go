@@ -230,3 +230,78 @@ func TestServeRequestWithHeaders(t *testing.T) {
 		t.Errorf("expected message with token, got %q", resp.Message)
 	}
 }
+
+func TestResponseCapture_BodyBytes(t *testing.T) {
+	capture := NewResponseCapture()
+	capture.WriteHeader(http.StatusOK)
+	capture.Write([]byte(`{"data":"test"}`))
+
+	bodyBytes := capture.BodyBytes()
+	if string(bodyBytes) != `{"data":"test"}` {
+		t.Errorf("expected body bytes, got %s", string(bodyBytes))
+	}
+}
+
+func TestMockIdentity_Scopes(t *testing.T) {
+	identity := NewMockIdentity("user").WithScopes("read", "write", "delete")
+
+	scopes := identity.Scopes()
+	if len(scopes) != 3 {
+		t.Fatalf("expected 3 scopes, got %d", len(scopes))
+	}
+	if scopes[0] != "read" || scopes[1] != "write" || scopes[2] != "delete" {
+		t.Errorf("unexpected scopes: %v", scopes)
+	}
+}
+
+func TestMockIdentity_Roles(t *testing.T) {
+	identity := NewMockIdentity("user").WithRoles("admin", "moderator")
+
+	roles := identity.Roles()
+	if len(roles) != 2 {
+		t.Fatalf("expected 2 roles, got %d", len(roles))
+	}
+	if roles[0] != "admin" || roles[1] != "moderator" {
+		t.Errorf("unexpected roles: %v", roles)
+	}
+}
+
+func TestAssertStatus_Success(t *testing.T) {
+	capture := NewResponseCapture()
+	capture.WriteHeader(http.StatusCreated)
+
+	// Should not panic or fail for matching status
+	AssertStatus(t, capture, http.StatusCreated)
+}
+
+func TestAssertJSON_Success(t *testing.T) {
+	capture := NewResponseCapture()
+	capture.WriteHeader(http.StatusOK)
+	capture.Write([]byte(`{"name":"test","count":42}`))
+
+	expected := map[string]any{
+		"name":  "test",
+		"count": float64(42),
+	}
+
+	// Should not panic or fail for matching JSON
+	AssertJSON(t, capture, expected)
+}
+
+func TestAssertErrorCode_Success(t *testing.T) {
+	capture := NewResponseCapture()
+	capture.WriteHeader(http.StatusNotFound)
+	capture.Write([]byte(`{"code":"NOT_FOUND","message":"not found"}`))
+
+	// Should not panic or fail for matching code
+	AssertErrorCode(t, capture, "NOT_FOUND")
+}
+
+func TestAssertContentType_Success(t *testing.T) {
+	capture := NewResponseCapture()
+	capture.Header().Set("Content-Type", "application/json")
+	capture.WriteHeader(http.StatusOK)
+
+	// Should not panic or fail for matching type
+	AssertContentType(t, capture, "application/json")
+}

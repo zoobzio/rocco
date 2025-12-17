@@ -401,3 +401,111 @@ func TestEngine_AdaptHandler_ErrorPath(t *testing.T) {
 		t.Errorf("expected status 500, got %d", w.Code)
 	}
 }
+
+func TestEngine_WithSpec(t *testing.T) {
+	engine := newTestEngine()
+
+	customSpec := &EngineSpec{
+		Info: openapi.Info{
+			Title:       "Custom API",
+			Version:     "2.0.0",
+			Description: "Custom description",
+		},
+		Tags: []openapi.Tag{
+			{Name: "custom", Description: "Custom tag"},
+		},
+	}
+
+	result := engine.WithSpec(customSpec)
+
+	// Should return engine for chaining
+	if result != engine {
+		t.Error("WithSpec should return the engine for chaining")
+	}
+
+	// Verify spec was set
+	if engine.spec.Info.Title != "Custom API" {
+		t.Errorf("expected title 'Custom API', got %q", engine.spec.Info.Title)
+	}
+	if engine.spec.Info.Version != "2.0.0" {
+		t.Errorf("expected version '2.0.0', got %q", engine.spec.Info.Version)
+	}
+	if len(engine.spec.Tags) != 1 || engine.spec.Tags[0].Name != "custom" {
+		t.Error("expected custom tag to be set")
+	}
+}
+
+func TestEngine_WithTag(t *testing.T) {
+	engine := newTestEngine()
+
+	// Add a new tag
+	result := engine.WithTag("users", "User management endpoints")
+
+	// Should return engine for chaining
+	if result != engine {
+		t.Error("WithTag should return the engine for chaining")
+	}
+
+	// Verify tag was added
+	found := false
+	for _, tag := range engine.spec.Tags {
+		if tag.Name == "users" && tag.Description == "User management endpoints" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected 'users' tag to be added")
+	}
+}
+
+func TestEngine_WithTag_UpdateExisting(t *testing.T) {
+	engine := newTestEngine()
+
+	// Add initial tag
+	engine.WithTag("users", "Initial description")
+
+	// Update the same tag
+	engine.WithTag("users", "Updated description")
+
+	// Count tags with name "users" - should be only 1
+	count := 0
+	var desc string
+	for _, tag := range engine.spec.Tags {
+		if tag.Name == "users" {
+			count++
+			desc = tag.Description
+		}
+	}
+
+	if count != 1 {
+		t.Errorf("expected 1 'users' tag, got %d", count)
+	}
+	if desc != "Updated description" {
+		t.Errorf("expected 'Updated description', got %q", desc)
+	}
+}
+
+func TestEngine_WithTag_MultipleTags(t *testing.T) {
+	engine := newTestEngine()
+
+	engine.WithTag("users", "User endpoints").
+		WithTag("orders", "Order endpoints").
+		WithTag("products", "Product endpoints")
+
+	if len(engine.spec.Tags) < 3 {
+		t.Errorf("expected at least 3 tags, got %d", len(engine.spec.Tags))
+	}
+
+	// Verify all tags exist
+	tagNames := make(map[string]bool)
+	for _, tag := range engine.spec.Tags {
+		tagNames[tag.Name] = true
+	}
+
+	for _, expected := range []string{"users", "orders", "products"} {
+		if !tagNames[expected] {
+			t.Errorf("missing tag %q", expected)
+		}
+	}
+}

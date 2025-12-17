@@ -142,6 +142,31 @@ func TestError_Is(t *testing.T) {
 	}
 }
 
+func TestError_Is_NonErrorDefinition(t *testing.T) {
+	// Test that Is returns false for non-ErrorDefinition targets
+	roccoErr := NewError[NoDetails]("TEST", 400, "test")
+	plainErr := errors.New("plain error")
+
+	// Is() should return false when target is not ErrorDefinition
+	if roccoErr.Is(plainErr) {
+		t.Error("Is() should return false for non-ErrorDefinition targets")
+	}
+
+	// errors.Is should also return false
+	if errors.Is(roccoErr, plainErr) {
+		t.Error("errors.Is should return false for non-ErrorDefinition targets")
+	}
+}
+
+func TestError_Is_NilTarget(t *testing.T) {
+	roccoErr := NewError[NoDetails]("TEST", 400, "test")
+
+	// Is() with nil should return false
+	if roccoErr.Is(nil) {
+		t.Error("Is() should return false for nil target")
+	}
+}
+
 func TestSentinelErrors_Exist(t *testing.T) {
 	tests := []struct {
 		name    string
