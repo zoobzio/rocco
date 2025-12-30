@@ -129,7 +129,7 @@ func TestEvents_RequestLifecycle_Success(t *testing.T) {
 
 	req := httptest.NewRequest("GET", "/test", nil)
 	w := httptest.NewRecorder()
-	engine.chiRouter.ServeHTTP(w, req)
+	engine.mux.ServeHTTP(w, req)
 
 	if !requestReceived {
 		t.Error("RequestReceived not emitted")
@@ -173,7 +173,7 @@ func TestEvents_RequestLifecycle_Failed(t *testing.T) {
 
 	req := httptest.NewRequest("GET", "/fail", nil)
 	w := httptest.NewRecorder()
-	engine.chiRouter.ServeHTTP(w, req)
+	engine.mux.ServeHTTP(w, req)
 
 	if !requestFailed {
 		t.Error("RequestFailed not emitted")
@@ -208,7 +208,7 @@ func TestEvents_HandlerExecuting(t *testing.T) {
 
 	req := httptest.NewRequest("GET", "/exec", nil)
 	w := httptest.NewRecorder()
-	engine.chiRouter.ServeHTTP(w, req)
+	engine.mux.ServeHTTP(w, req)
 
 	if !handlerExecuting {
 		t.Error("HandlerExecuting not emitted")
@@ -243,7 +243,7 @@ func TestEvents_HandlerSuccess(t *testing.T) {
 
 	req := httptest.NewRequest("POST", "/success", nil)
 	w := httptest.NewRecorder()
-	engine.chiRouter.ServeHTTP(w, req)
+	engine.mux.ServeHTTP(w, req)
 
 	if !handlerSuccess {
 		t.Error("HandlerSuccess not emitted")
@@ -279,7 +279,7 @@ func TestEvents_HandlerError(t *testing.T) {
 
 	req := httptest.NewRequest("GET", "/error", nil)
 	w := httptest.NewRecorder()
-	engine.chiRouter.ServeHTTP(w, req)
+	engine.mux.ServeHTTP(w, req)
 
 	if !handlerError {
 		t.Error("HandlerError not emitted")
@@ -316,7 +316,7 @@ func TestEvents_HandlerSentinelError(t *testing.T) {
 
 	req := httptest.NewRequest("GET", "/sentinel", nil)
 	w := httptest.NewRecorder()
-	engine.chiRouter.ServeHTTP(w, req)
+	engine.mux.ServeHTTP(w, req)
 
 	if !sentinelError {
 		t.Error("HandlerSentinelError not emitted")
@@ -354,7 +354,7 @@ func TestEvents_HandlerUndeclaredSentinel(t *testing.T) {
 
 	req := httptest.NewRequest("GET", "/undeclared", nil)
 	w := httptest.NewRecorder()
-	engine.chiRouter.ServeHTTP(w, req)
+	engine.mux.ServeHTTP(w, req)
 
 	if !undeclaredSentinel {
 		t.Error("HandlerUndeclaredSentinel not emitted")
@@ -390,7 +390,7 @@ func TestEvents_RequestBodyParseError(t *testing.T) {
 	// Invalid JSON
 	req := httptest.NewRequest("POST", "/parse", bytes.NewBufferString("{invalid json"))
 	w := httptest.NewRecorder()
-	engine.chiRouter.ServeHTTP(w, req)
+	engine.mux.ServeHTTP(w, req)
 
 	if !parseError {
 		t.Error("RequestBodyParseError not emitted")
@@ -431,7 +431,7 @@ func TestEvents_RequestValidationInputFailed(t *testing.T) {
 	body, _ := json.Marshal(map[string]string{"email": "not-an-email"})
 	req := httptest.NewRequest("POST", "/validate", bytes.NewBuffer(body))
 	w := httptest.NewRecorder()
-	engine.chiRouter.ServeHTTP(w, req)
+	engine.mux.ServeHTTP(w, req)
 
 	if !validationFailed {
 		t.Error("RequestValidationInputFailed not emitted")
@@ -471,7 +471,7 @@ func TestEvents_RequestValidationOutputFailed(t *testing.T) {
 
 	req := httptest.NewRequest("GET", "/output-validate", nil)
 	w := httptest.NewRecorder()
-	engine.chiRouter.ServeHTTP(w, req)
+	engine.mux.ServeHTTP(w, req)
 
 	if !validationFailed {
 		t.Error("RequestValidationOutputFailed not emitted")

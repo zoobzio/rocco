@@ -1,6 +1,10 @@
+version: "2"
+
 run:
   timeout: 5m
   tests: true
+  build-tags:
+    - integration
 
 linters:
   enable:
@@ -16,7 +20,6 @@ linters:
     - ineffassign  # Detect ineffectual assignments
     - staticcheck  # Advanced static analysis
     - unused       # Unused code detection
-    - typecheck    # Type checking
 
     # Error handling
     - errcheck     # Unchecked errors
@@ -31,174 +34,165 @@ linters:
     - goconst      # Repeated strings as constants
     - godot        # Comment sentences
     - godox        # TODO/FIXME comments
-    - gofmt        # Formatting
-    - goimports    # Import organization
     - misspell     # Spelling mistakes
     - nakedret     # Naked returns
     - prealloc     # Slice capacity hints
     - predeclared  # Shadowing predeclared identifiers
     - copyloopvar  # Loop variable capture
 
-linters-settings:
-  gosec:
-    severity: medium
-    confidence: medium
-    excludes:
-      - G104  # We'll use errcheck instead
-    config:
-      global:
-        audit: true
-
-  govet:
-    enable-all: true
-    disable:
-      - fieldalignment  # Performance optimization, not critical for correctness
-
-  errcheck:
-    check-type-assertions: true
-    check-blank: true
-    exclude-functions:
-      - (io.Closer).Close  # Handled by bodyclose
-      - (net/http.ResponseWriter).Write  # Standard practice after WriteHeader
-      - (*encoding/json.Encoder).Encode  # Standard practice for response encoding
-
-  gocritic:
-    enabled-checks:
-      # Only non-default checks
-      - commentedOutCode
-      - deferInLoop
-      - emptyFallthrough
-      - emptyStringTest
-      - equalFold
-      - evalOrder
-      - exposedSyncMutex
-      - externalErrorReassign
-      - filepathJoin
-      - hexLiteral
-      - httpNoBody
-      - importShadow
-      - indexAlloc
-      - initClause
-      - nestingReduce
-      - nilValReturn
-      - octalLiteral
-      - preferFilepathJoin
-      - preferFprint
-      - preferStringWriter
-      - preferWriteByte
-      - rangeExprCopy
-      - rangeValCopy
-      - redundantSprint
-      - regexpPattern
-      - regexpSimplify
-      - ruleguard
-      - sloppyReassign
-      - sortSlice
-      - sprintfQuotedString
-      - sqlQuery
-      - stringConcatSimplify
-      - stringXbytes
-      - syncMapLoadAndDelete
-      - truncateCmp
-      - typeAssertChain
-      - typeDefFirst
-      - typeUnparen
-      - unlabelStmt
-      - unnamedResult
-      - unnecessaryBlock
-      - unnecessaryDefer
-      - weakCond
-      - yodaStyleExpr
-
-  revive:
-    severity: warning
+  exclusions:
     rules:
-      - name: blank-imports
-      - name: context-as-argument
-      - name: context-keys-type
-      - name: dot-imports
-      - name: empty-block
-      - name: error-naming
-      - name: error-return
-      - name: error-strings
-      - name: errorf
-      - name: exported
-      - name: if-return
-      - name: increment-decrement
-      - name: indent-error-flow
-      - name: modifies-parameter
-      - name: modifies-value-receiver
-      - name: package-comments
-      - name: range
-      - name: receiver-naming
-      - name: redefines-builtin-id
-      - name: string-of-int
-      - name: superfluous-else
-      - name: time-naming
-      - name: unexported-return
-      - name: unnecessary-stmt
-      - name: unreachable-code
-      - name: unused-parameter
-      - name: unused-receiver
-      - name: useless-break
-      - name: var-declaration
-      - name: var-naming
+      # Allow TODO comments in development
+      - linters:
+          - godox
+        text: "TODO|FIXME|BUG"
 
-  dupl:
-    threshold: 150
+      # Test files can have longer functions and different struct ordering
+      - path: _test\.go
+        linters:
+          - funlen
+          - goconst
+          - dupl
+          - govet
+          - errcheck
+          - godot
+          - gocritic
+          - errorlint
+          - errchkjson
+          - revive
 
-  goconst:
-    min-len: 3
-    min-occurrences: 3
+      # Example code can be less strict
+      - path: cmd/example/
+        linters:
+          - godot
+          - goconst
 
-  misspell:
-    locale: US
+      # OpenAPI generation code can have string literals
+      - path: docs\.go
+        linters:
+          - goconst
+          - godot
+
+      # Core type definitions can skip godot
+      - path: (errors|openapi|events|request|config|interfaces|spec|stream)\.go
+        linters:
+          - godot
+
+  settings:
+    gosec:
+      severity: medium
+      confidence: medium
+      excludes:
+        - G104  # We'll use errcheck instead
+      config:
+        global:
+          audit: true
+
+    govet:
+      enable-all: true
+      disable:
+        - fieldalignment  # Performance optimization, not critical for correctness
+
+    errcheck:
+      check-type-assertions: true
+      check-blank: true
+      exclude-functions:
+        - (io.Closer).Close  # Handled by bodyclose
+        - (net/http.ResponseWriter).Write  # Standard practice after WriteHeader
+        - (*encoding/json.Encoder).Encode  # Standard practice for response encoding
+
+    gocritic:
+      enabled-checks:
+        - commentedOutCode
+        - deferInLoop
+        - emptyFallthrough
+        - emptyStringTest
+        - equalFold
+        - evalOrder
+        - exposedSyncMutex
+        - externalErrorReassign
+        - filepathJoin
+        - hexLiteral
+        - httpNoBody
+        - importShadow
+        - indexAlloc
+        - initClause
+        - nestingReduce
+        - nilValReturn
+        - octalLiteral
+        - preferFilepathJoin
+        - preferFprint
+        - preferStringWriter
+        - preferWriteByte
+        - rangeExprCopy
+        - rangeValCopy
+        - redundantSprint
+        - regexpPattern
+        - regexpSimplify
+        - ruleguard
+        - sloppyReassign
+        - sortSlice
+        - sprintfQuotedString
+        - sqlQuery
+        - stringConcatSimplify
+        - stringXbytes
+        - syncMapLoadAndDelete
+        - truncateCmp
+        - typeAssertChain
+        - typeDefFirst
+        - typeUnparen
+        - unlabelStmt
+        - unnamedResult
+        - unnecessaryBlock
+        - unnecessaryDefer
+        - weakCond
+        - yodaStyleExpr
+
+    revive:
+      severity: warning
+      rules:
+        - name: blank-imports
+        - name: context-as-argument
+        - name: context-keys-type
+        - name: dot-imports
+        - name: empty-block
+        - name: error-naming
+        - name: error-return
+        - name: error-strings
+        - name: errorf
+        - name: exported
+        - name: if-return
+        - name: increment-decrement
+        - name: indent-error-flow
+        - name: modifies-parameter
+        - name: modifies-value-receiver
+        - name: package-comments
+        - name: range
+        - name: receiver-naming
+        - name: redefines-builtin-id
+        - name: string-of-int
+        - name: superfluous-else
+        - name: time-naming
+        - name: unexported-return
+        - name: unnecessary-stmt
+        - name: unreachable-code
+        - name: unused-parameter
+        - name: unused-receiver
+        - name: useless-break
+        - name: var-declaration
+        - name: var-naming
+
+    dupl:
+      threshold: 150
+
+    goconst:
+      min-len: 3
+      min-occurrences: 3
+
+    misspell:
+      locale: US
 
 issues:
-  exclude-dirs-use-default: false
-  exclude-rules:
-    # Allow TODO comments in development
-    - linters:
-        - godox
-      text: "TODO|FIXME|BUG"
-
-    # Test files can have longer functions and different struct ordering
-    - path: _test\.go
-      linters:
-        - funlen
-        - goconst
-        - dupl
-        - govet
-        - errcheck
-        - godot
-        - gofmt
-        - gocritic
-        - errorlint
-        - errchkjson
-        - revive
-
-    # Example code can be less strict
-    - path: cmd/example/
-      linters:
-        - godot
-        - goconst
-
-    # OpenAPI generation code can have string literals
-    - path: docs\.go
-      linters:
-        - goconst
-        - godot
-
-    # Core type definitions can skip godot
-    - path: (errors|openapi|event|request|config|interfaces)\.go
-      linters:
-        - godot
-
-  # Maximum issues count per one linter
   max-issues-per-linter: 0
-
-  # Maximum count of issues with same text
   max-same-issues: 0
-
-  # Show all issues
   new: false

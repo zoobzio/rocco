@@ -3,10 +3,9 @@ module github.com/zoobzio/rocco
 go 1.24.5
 
 require (
-	github.com/go-chi/chi/v5 v5.2.3
 	github.com/go-playground/validator/v10 v10.28.0
-	github.com/zoobzio/capitan v0.0.8
-	github.com/zoobzio/openapi v0.0.2
+	github.com/zoobzio/capitan v0.1.0
+	github.com/zoobzio/openapi v0.1.1
 	github.com/zoobzio/sentinel v0.0.6
 )
 

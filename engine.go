@@ -9,16 +9,24 @@ import (
 	"sync"
 	"time"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/zoobzio/capitan"
 	"github.com/zoobzio/openapi"
 )
 
+// chain wraps a handler with middleware (applied in reverse order).
+func chain(h http.Handler, mw ...func(http.Handler) http.Handler) http.Handler {
+	for i := len(mw) - 1; i >= 0; i-- {
+		h = mw[i](h)
+	}
+	return h
+}
+
+// Engine is the core HTTP server that manages routing, middleware, and handler registration.
 type Engine struct {
 	config              *EngineConfig
 	server              *http.Server
-	chiRouter           chi.Router
-	middleware          []func(http.Handler) http.Handler
+	mux                 *http.ServeMux
+	globalMiddleware    []func(http.Handler) http.Handler
 	handlers            []Endpoint // Registered handlers for OpenAPI generation
 	extractIdentity     func(context.Context, *http.Request) (Identity, error)
 	ctx                 context.Context
@@ -47,24 +55,24 @@ func NewEngine(
 
 	ctx, cancel := context.WithCancel(context.Background())
 
-	// Create Chi router
-	r := chi.NewRouter()
+	// Create stdlib ServeMux
+	mux := http.NewServeMux()
 
 	e := &Engine{
-		config:          config,
-		chiRouter:       r,
-		middleware:      make([]func(http.Handler) http.Handler, 0),
-		extractIdentity: extractIdentity,
-		ctx:             ctx,
-		cancel:          cancel,
-		spec:            DefaultEngineSpec(),
+		config:           config,
+		mux:              mux,
+		globalMiddleware: make([]func(http.Handler) http.Handler, 0),
+		extractIdentity:  extractIdentity,
+		ctx:              ctx,
+		cancel:           cancel,
+		spec:             DefaultEngineSpec(),
 	}
 
 	// Create HTTP server
 	addr := fmt.Sprintf("%s:%d", config.Host, config.Port)
 	e.server = &http.Server{
 		Addr:         addr,
-		Handler:      e.chiRouter,
+		Handler:      e.mux,
 		ReadTimeout:  config.ReadTimeout,
 		WriteTimeout: config.WriteTimeout,
 		IdleTimeout:  config.IdleTimeout,
@@ -81,9 +89,7 @@ func NewEngine(
 
 // WithMiddleware adds global middleware to the engine and returns the engine for chaining.
 func (e *Engine) WithMiddleware(middleware ...func(http.Handler) http.Handler) *Engine {
-	for _, mw := range middleware {
-		e.chiRouter.Use(mw)
-	}
+	e.globalMiddleware = append(e.globalMiddleware, middleware...)
 	return e
 }
 
@@ -117,10 +123,10 @@ func (e *Engine) WithTag(name, description string) *Engine {
 	return e
 }
 
-// Router returns the underlying chi.Router for advanced use cases.
+// Router returns the underlying http.ServeMux for advanced use cases.
 // This allows power users to register custom routes that won't appear in OpenAPI documentation.
-func (e *Engine) Router() chi.Router {
-	return e.chiRouter
+func (e *Engine) Router() *http.ServeMux {
+	return e.mux
 }
 
 // WithHandlers adds one or more Endpoints to the engine and returns the engine for chaining.
@@ -161,12 +167,15 @@ func (e *Engine) WithHandlers(handlers ...Endpoint) *Engine {
 			}
 		}
 
-		if len(middleware) > 0 {
-			e.chiRouter.With(middleware...).Method(handlerSpec.Method, handlerSpec.Path, httpHandler)
-		} else {
-			// Register with Chi (no handler middleware).
-			e.chiRouter.Method(handlerSpec.Method, handlerSpec.Path, httpHandler)
-		}
+		// Compose all middleware: global + handler-specific
+		allMiddleware := make([]func(http.Handler) http.Handler, 0, len(e.globalMiddleware)+len(middleware))
+		allMiddleware = append(allMiddleware, e.globalMiddleware...)
+		allMiddleware = append(allMiddleware, middleware...)
+		wrappedHandler := chain(httpHandler, allMiddleware...)
+
+		// Register with stdlib mux using "METHOD /path" pattern
+		pattern := handlerSpec.Method + " " + handlerSpec.Path
+		e.mux.Handle(pattern, wrappedHandler)
 
 		// Emit handler registered event
 		capitan.Debug(e.ctx, HandlerRegistered,
@@ -359,7 +368,7 @@ func (e *Engine) ensureDefaultHandlers() {
 // registerDefaultHandlers sets up OpenAPI spec and docs handlers at /openapi and /docs.
 func (e *Engine) registerDefaultHandlers() {
 	// OpenAPI spec handler at /openapi
-	e.chiRouter.Get("/openapi", func(w http.ResponseWriter, _ *http.Request) {
+	e.mux.HandleFunc("GET /openapi", func(w http.ResponseWriter, _ *http.Request) {
 		// Generate and cache spec on first request (cached forever after)
 		e.openAPIOnce.Do(func() {
 			spec := e.GenerateOpenAPI(nil)
@@ -382,7 +391,7 @@ func (e *Engine) registerDefaultHandlers() {
 	})
 
 	// Docs handler at /docs
-	e.chiRouter.Get("/docs", func(w http.ResponseWriter, _ *http.Request) {
+	e.mux.HandleFunc("GET /docs", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
 

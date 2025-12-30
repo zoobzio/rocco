@@ -123,6 +123,29 @@ var (
 	RateLimitExceeded = capitan.NewSignal("http.ratelimit.exceeded", "Usage limit threshold exceeded for request")
 )
 
+// Stream (SSE) lifecycle signals.
+var (
+	// StreamExecuting is emitted when stream handler execution begins.
+	// Fields: HandlerNameKey.
+	StreamExecuting = capitan.NewSignal("http.stream.executing", "Stream handler execution started for incoming request")
+
+	// StreamStarted is emitted when SSE stream is established and headers sent.
+	// Fields: HandlerNameKey.
+	StreamStarted = capitan.NewSignal("http.stream.started", "SSE stream established and response headers sent")
+
+	// StreamEnded is emitted when stream handler completes normally.
+	// Fields: HandlerNameKey.
+	StreamEnded = capitan.NewSignal("http.stream.ended", "SSE stream handler completed normally")
+
+	// StreamClientDisconnected is emitted when client disconnects from stream.
+	// Fields: HandlerNameKey.
+	StreamClientDisconnected = capitan.NewSignal("http.stream.client.disconnected", "Client disconnected from SSE stream")
+
+	// StreamError is emitted when stream handler encounters an error.
+	// Fields: HandlerNameKey, ErrorKey.
+	StreamError = capitan.NewSignal("http.stream.error", "SSE stream handler encountered error")
+)
+
 // Event field keys (primitive types only).
 var (
 	// Engine fields.

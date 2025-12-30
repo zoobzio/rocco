@@ -11,8 +11,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-
-	"github.com/go-chi/chi/v5"
 )
 
 // errorReader is a reader that always returns an error
@@ -292,14 +290,12 @@ func TestHandler_ExtractParams_PathParams(t *testing.T) {
 		},
 	).WithPathParams("id")
 
-	// Create Chi route context
-	rctx := chi.NewRouteContext()
-	rctx.URLParams.Add("id", "123")
-
-	ctx := context.WithValue(context.Background(), chi.RouteCtxKey, rctx)
+	// Create request with path value set
 	req := httptest.NewRequest("GET", "/users/123", nil)
+	req.SetPathValue("id", "123")
 
-	params, err := handler.extractParams(ctx, req)
+	spec := handler.Spec()
+	params, err := extractParams(context.Background(), req, spec.PathParams, spec.QueryParams)
 
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -321,7 +317,8 @@ func TestHandler_ExtractParams_MissingPathParam(t *testing.T) {
 
 	req := httptest.NewRequest("GET", "/users/123", nil)
 
-	_, err := handler.extractParams(context.Background(), req)
+	spec := handler.Spec()
+	_, err := extractParams(context.Background(), req, spec.PathParams, spec.QueryParams)
 
 	if err == nil {
 		t.Fatal("expected error for missing path param")
@@ -340,7 +337,8 @@ func TestHandler_ExtractParams_QueryParams(t *testing.T) {
 
 	req := httptest.NewRequest("GET", "/test?page=1&limit=10", nil)
 
-	params, err := handler.extractParams(context.Background(), req)
+	spec := handler.Spec()
+	params, err := extractParams(context.Background(), req, spec.PathParams, spec.QueryParams)
 
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -365,7 +363,8 @@ func TestHandler_ExtractParams_MissingQueryParam(t *testing.T) {
 
 	req := httptest.NewRequest("GET", "/test", nil)
 
-	params, err := handler.extractParams(context.Background(), req)
+	spec := handler.Spec()
+	params, err := extractParams(context.Background(), req, spec.PathParams, spec.QueryParams)
 
 	// Missing query params should result in empty string, not error
 	if err != nil {

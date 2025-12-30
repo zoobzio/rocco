@@ -31,6 +31,9 @@ type HandlerSpec struct {
 
 	// Rate Limiting
 	UsageLimits []UsageLimit `json:"usageLimits,omitempty" yaml:"usageLimits,omitempty"`
+
+	// Streaming
+	IsStream bool `json:"isStream,omitempty" yaml:"isStream,omitempty"` // SSE stream handler
 }
 
 // EngineSpec contains declarative configuration for the API engine.

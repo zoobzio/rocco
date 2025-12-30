@@ -215,7 +215,7 @@ func TestServeRequestWithHeaders(t *testing.T) {
 		"GET",
 		"/test",
 		func(req *rocco.Request[rocco.NoBody]) (testOutput, error) {
-			token := req.Request.Header.Get("Authorization")
+			token := req.Header.Get("Authorization")
 			return testOutput{Message: token}, nil
 		},
 	)

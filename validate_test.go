@@ -8,14 +8,15 @@ import (
 )
 
 func TestParseValidateTag_NumericConstraints(t *testing.T) {
+	// OpenAPI 3.1.0: exclusiveMinimum/Maximum are the actual bound values, not booleans
 	tests := []struct {
 		name        string
 		validateTag string
 		goType      string
 		wantMin     *float64
 		wantMax     *float64
-		wantExclMin *bool
-		wantExclMax *bool
+		wantExclMin *float64 // OpenAPI 3.1.0: exclusive bounds are float values
+		wantExclMax *float64 // OpenAPI 3.1.0: exclusive bounds are float values
 	}{
 		{
 			name:        "min constraint on int",
@@ -52,15 +53,13 @@ func TestParseValidateTag_NumericConstraints(t *testing.T) {
 			name:        "gt constraint (exclusive)",
 			validateTag: "gt=0",
 			goType:      "int",
-			wantMin:     float64Ptr(0),
-			wantExclMin: boolPtr(true),
+			wantExclMin: float64Ptr(0), // OpenAPI 3.1.0: exclusiveMinimum is the value itself
 		},
 		{
 			name:        "lt constraint (exclusive)",
 			validateTag: "lt=100",
 			goType:      "int",
-			wantMax:     float64Ptr(100),
-			wantExclMax: boolPtr(true),
+			wantExclMax: float64Ptr(100), // OpenAPI 3.1.0: exclusiveMaximum is the value itself
 		},
 	}
 
@@ -87,14 +86,14 @@ func TestParseValidateTag_NumericConstraints(t *testing.T) {
 			}
 
 			if tt.wantExclMin != nil {
-				exclMin := constraints["exclusiveMinimum"].(*bool)
+				exclMin := constraints["exclusiveMinimum"].(*float64)
 				if *exclMin != *tt.wantExclMin {
 					t.Errorf("exclusiveMinimum = %v, want %v", *exclMin, *tt.wantExclMin)
 				}
 			}
 
 			if tt.wantExclMax != nil {
-				exclMax := constraints["exclusiveMaximum"].(*bool)
+				exclMax := constraints["exclusiveMaximum"].(*float64)
 				if *exclMax != *tt.wantExclMax {
 					t.Errorf("exclusiveMaximum = %v, want %v", *exclMax, *tt.wantExclMax)
 				}
@@ -373,7 +372,7 @@ func TestApplyOpenAPITags_ValidateTag(t *testing.T) {
 		},
 	}
 
-	schema := &openapi.Schema{Type: "integer"}
+	schema := &openapi.Schema{Type: openapi.NewSchemaType("integer")}
 	applyOpenAPITags(schema, field)
 
 	// Check validate-derived constraints
@@ -403,7 +402,7 @@ func TestApplyOpenAPITags_ValidateEmail(t *testing.T) {
 		},
 	}
 
-	schema := &openapi.Schema{Type: "string"}
+	schema := &openapi.Schema{Type: openapi.NewSchemaType("string")}
 	applyOpenAPITags(schema, field)
 
 	if schema.Format != "email" {
@@ -426,7 +425,7 @@ func TestApplyOpenAPITags_ValidateArray(t *testing.T) {
 		},
 	}
 
-	schema := &openapi.Schema{Type: "array"}
+	schema := &openapi.Schema{Type: openapi.NewSchemaType("array")}
 	applyOpenAPITags(schema, field)
 
 	if schema.MinItems == nil || *schema.MinItems != 5 {
@@ -449,7 +448,7 @@ func TestApplyOpenAPITags_ValidateEnum(t *testing.T) {
 		},
 	}
 
-	schema := &openapi.Schema{Type: "string"}
+	schema := &openapi.Schema{Type: openapi.NewSchemaType("string")}
 	applyOpenAPITags(schema, field)
 
 	if schema.Enum == nil {

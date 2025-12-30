@@ -14,7 +14,8 @@ Type-safe HTTP framework for Go with automatic OpenAPI generation.
 ## Features
 
 - **Type-Safe Handlers**: Generic handlers with compile-time type checking
-- **Automatic OpenAPI**: Generate OpenAPI 3.0.3 specs from your code
+- **Server-Sent Events**: Built-in SSE support for real-time streaming
+- **Automatic OpenAPI**: Generate OpenAPI 3.1.0 specs from your code
 - **Request Validation**: Built-in validation using struct tags
 - **Sentinel Errors**: HTTP error handling with sentinel error pattern
 - **Chi Integration**: Powered by the battle-tested Chi router
@@ -116,6 +117,47 @@ handler := rocco.NewHandler[rocco.NoBody, UserListOutput](
     },
 ).WithQueryParams("page", "limit")
 ```
+
+### Streaming (SSE)
+
+Stream handlers enable real-time server-to-client communication using Server-Sent Events:
+
+```go
+type PriceUpdate struct {
+    Symbol string  `json:"symbol"`
+    Price  float64 `json:"price"`
+}
+
+handler := rocco.NewStreamHandler[rocco.NoBody, PriceUpdate](
+    "price-stream",
+    http.MethodGet,
+    "/prices/stream",
+    func(req *rocco.Request[rocco.NoBody], stream rocco.Stream[PriceUpdate]) error {
+        ticker := time.NewTicker(time.Second)
+        defer ticker.Stop()
+
+        for {
+            select {
+            case <-stream.Done():
+                return nil  // Client disconnected
+            case <-ticker.C:
+                if err := stream.Send(PriceUpdate{
+                    Symbol: "BTC",
+                    Price:  getCurrentPrice(),
+                }); err != nil {
+                    return err
+                }
+            }
+        }
+    },
+).WithSummary("Stream price updates")
+```
+
+The `Stream[T]` interface provides:
+- `Send(data T)` - Send data events
+- `SendEvent(event, data)` - Send named events
+- `SendComment(comment)` - Send keep-alive comments
+- `Done()` - Channel closed on client disconnect
 
 ### Request Parameters
 
@@ -243,7 +285,7 @@ Middleware execution order: engine middleware runs first, then handler middlewar
 
 ### OpenAPI Generation
 
-OpenAPI 3.0.3 specs are automatically generated from your handlers:
+OpenAPI 3.1.0 specs are automatically generated from your handlers:
 
 ```go
 // Register OpenAPI endpoint

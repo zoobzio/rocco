@@ -1,3 +1,4 @@
+// Package rocco provides a type-safe HTTP framework for Go with automatic OpenAPI generation.
 package rocco
 
 import "time"

@@ -2,8 +2,6 @@ github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/gabriel-vasile/mimetype v1.4.10 h1:zyueNbySn/z8mJZHLt6IPw0KoZsiQNszIpU+bX4+ZK0=
 github.com/gabriel-vasile/mimetype v1.4.10/go.mod h1:d+9Oxyo1wTzWdyVUPMmXFvp4F9tea18J8ufA774AB3s=
-github.com/go-chi/chi/v5 v5.2.3 h1:WQIt9uxdsAbgIYgid+BpYc+liqQZGMHRaUwp0JUcvdE=
-github.com/go-chi/chi/v5 v5.2.3/go.mod h1:L2yAIGWB3H+phAw1NxKwWM+7eUH/lU8pOMm5hHcoops=
 github.com/go-playground/assert/v2 v2.2.0 h1:JvknZsQTYeFEAhQwI4qEt9cyV5ONwRHC+lYKSsYSR8s=
 github.com/go-playground/assert/v2 v2.2.0/go.mod h1:VDjEfimB/XKnb+ZQfWdccd7VUvScMdVu0Titje2rxJ4=
 github.com/go-playground/locales v0.14.1 h1:EWaQ/wswjilfKLTECiXz7Rh+3BjFhfDFKv/oXslEjJA=
@@ -18,10 +16,10 @@ github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZb
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
 github.com/stretchr/testify v1.8.4 h1:CcVxjf3Q8PM0mHUKJCdn+eZZtm5yQwehR5yeSVQQcUk=
 github.com/stretchr/testify v1.8.4/go.mod h1:sz/lmYIOXD/1dqDmKjjqLyZ2RngseejIcXlSw2iwfAo=
-github.com/zoobzio/capitan v0.0.8 h1:mSsJv+4+D3Fl4KgQ7xU3SdagHWXV1m/J+BLGcnFc33c=
-github.com/zoobzio/capitan v0.0.8/go.mod h1:/OwNDIB1CHxwSzsF4e48B2+2e/IMIvTb0ZMgVeNyYig=
-github.com/zoobzio/openapi v0.0.2 h1:dH2mT1lpNV4D2tbNiRWVIqafO8TU1J0HNkTIUGc5Boo=
-github.com/zoobzio/openapi v0.0.2/go.mod h1:DFKLNIJO25VWcDdx7i12Zu5wKoFSAOCDufyMrhgl8BQ=
+github.com/zoobzio/capitan v0.1.0 h1:OmTmZNtUhoIDIA7sQ50x9CP21JJUYkqZFyavY6torMA=
+github.com/zoobzio/capitan v0.1.0/go.mod h1:/OwNDIB1CHxwSzsF4e48B2+2e/IMIvTb0ZMgVeNyYig=
+github.com/zoobzio/openapi v0.1.1 h1:+ik1bCB1qK4wtcrTuA/9YZc6LJkaLOz0eoDUaf9D83Q=
+github.com/zoobzio/openapi v0.1.1/go.mod h1:B9H/O52knkfi9j9KIGRufcSFYUyAg6gDhUGocMCFNfo=
 github.com/zoobzio/sentinel v0.0.6 h1:K6xqs/qelsjC5wGthPzw3cRWjGi0p1mwhh5oSJQT6Ko=
 github.com/zoobzio/sentinel v0.0.6/go.mod h1:1c0vVxUQLFuBrAqMJyvWKWsRW5fp2UT5+jzC9FucUWY=
 golang.org/x/crypto v0.42.0 h1:chiH31gIWm57EkTXpwnqf8qeuMUi0yekh6mT2AvFlqI=

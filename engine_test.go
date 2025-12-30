@@ -32,7 +32,7 @@ func TestNewEngine(t *testing.T) {
 	if engine.server == nil {
 		t.Error("HTTP server not initialized")
 	}
-	if engine.chiRouter == nil {
+	if engine.mux == nil {
 		t.Error("Chi router not initialized")
 	}
 }
@@ -53,12 +53,12 @@ func TestEngine_Router(t *testing.T) {
 
 	router := engine.Router()
 	if router == nil {
-		t.Fatal("expected chi.Router, got nil")
+		t.Fatal("expected *http.ServeMux, got nil")
 	}
 
 	// Verify it's the same instance
-	if router != engine.chiRouter {
-		t.Error("Router() returned different instance than internal chiRouter")
+	if router != engine.mux {
+		t.Error("Router() returned different instance than internal mux")
 	}
 }
 
@@ -89,7 +89,7 @@ func TestEngine_Use(t *testing.T) {
 	// Test middleware is called
 	req := httptest.NewRequest("GET", "/test", nil)
 	w := httptest.NewRecorder()
-	engine.chiRouter.ServeHTTP(w, req)
+	engine.mux.ServeHTTP(w, req)
 
 	if !middlewareCalled {
 		t.Error("middleware was not called")
@@ -117,7 +117,7 @@ func TestEngine_Register(t *testing.T) {
 	// Test handler is accessible via router
 	req := httptest.NewRequest("GET", "/test", nil)
 	w := httptest.NewRecorder()
-	engine.chiRouter.ServeHTTP(w, req)
+	engine.mux.ServeHTTP(w, req)
 
 	if w.Code != 200 {
 		t.Errorf("expected status 200, got %d", w.Code)
@@ -169,7 +169,7 @@ func TestEngine_RegisterOpenAPIHandler(t *testing.T) {
 	// Test default OpenAPI endpoint at /openapi
 	req := httptest.NewRequest("GET", "/openapi", nil)
 	w := httptest.NewRecorder()
-	engine.chiRouter.ServeHTTP(w, req)
+	engine.mux.ServeHTTP(w, req)
 
 	if w.Code != 200 {
 		t.Errorf("expected status 200, got %d", w.Code)
@@ -250,7 +250,7 @@ func TestEngine_Register_HandlerMiddleware(t *testing.T) {
 	// Test that handler middleware is applied
 	req := httptest.NewRequest("GET", "/test", nil)
 	w := httptest.NewRecorder()
-	engine.chiRouter.ServeHTTP(w, req)
+	engine.mux.ServeHTTP(w, req)
 
 	if !middlewareCalled {
 		t.Error("handler middleware was not called")
@@ -296,7 +296,7 @@ func TestEngine_Register_HandlerMiddlewareOrder(t *testing.T) {
 
 	req := httptest.NewRequest("GET", "/test", nil)
 	w := httptest.NewRecorder()
-	engine.chiRouter.ServeHTTP(w, req)
+	engine.mux.ServeHTTP(w, req)
 
 	if len(callOrder) != 3 {
 		t.Fatalf("expected 3 calls, got %d", len(callOrder))
@@ -342,7 +342,7 @@ func TestEngine_Register_HandlerAndEngineMiddleware(t *testing.T) {
 
 	req := httptest.NewRequest("GET", "/test", nil)
 	w := httptest.NewRecorder()
-	engine.chiRouter.ServeHTTP(w, req)
+	engine.mux.ServeHTTP(w, req)
 
 	if len(callOrder) != 3 {
 		t.Fatalf("expected 3 calls, got %d", len(callOrder))
@@ -370,7 +370,7 @@ func TestEngine_Register_NoHandlerMiddleware(t *testing.T) {
 
 	req := httptest.NewRequest("GET", "/test", nil)
 	w := httptest.NewRecorder()
-	engine.chiRouter.ServeHTTP(w, req)
+	engine.mux.ServeHTTP(w, req)
 
 	if w.Code != 200 {
 		t.Errorf("expected status 200, got %d", w.Code)
@@ -394,7 +394,7 @@ func TestEngine_AdaptHandler_ErrorPath(t *testing.T) {
 
 	req := httptest.NewRequest("GET", "/error", nil)
 	w := httptest.NewRecorder()
-	engine.chiRouter.ServeHTTP(w, req)
+	engine.mux.ServeHTTP(w, req)
 
 	// Should get 500 status for internal server error
 	if w.Code != 500 {

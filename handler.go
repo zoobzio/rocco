@@ -8,7 +8,6 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/go-playground/validator/v10"
 	"github.com/zoobzio/capitan"
 	"github.com/zoobzio/sentinel"
@@ -57,7 +56,7 @@ func (h *Handler[In, Out]) Process(ctx context.Context, r *http.Request, w http.
 	)
 
 	// Extract and validate parameters.
-	params, err := h.extractParams(ctx, r)
+	params, err := extractParams(ctx, r, h.spec.PathParams, h.spec.QueryParams)
 	if err != nil {
 		capitan.Error(ctx, RequestParamsInvalid,
 			HandlerNameKey.Field(h.spec.Name),
@@ -69,7 +68,7 @@ func (h *Handler[In, Out]) Process(ctx context.Context, r *http.Request, w http.
 
 	// Parse request body.
 	var input In
-	if h.InputMeta.TypeName != "NoBody" && r.Body != nil {
+	if h.InputMeta.TypeName != noBodyTypeName && r.Body != nil {
 		// Limit body size if configured - use MaxBytesReader for proper 413 errors
 		if h.maxBodySize > 0 {
 			r.Body = http.MaxBytesReader(w, r.Body, h.maxBodySize)
@@ -385,42 +384,6 @@ func (h *Handler[In, Out]) WithUsageLimit(key string, thresholdFunc func(Identit
 	// Usage limits require authentication
 	h.spec.RequiresAuth = true
 	return h
-}
-
-// extractParams extracts and validates required parameters from the request.
-func (h *Handler[In, Out]) extractParams(ctx context.Context, r *http.Request) (*Params, error) {
-	params := &Params{
-		Path:  make(map[string]string),
-		Query: make(map[string]string),
-	}
-
-	// Extract path params from Chi router context.
-	if rctx := chi.RouteContext(ctx); rctx != nil {
-		for i, key := range rctx.URLParams.Keys {
-			params.Path[key] = rctx.URLParams.Values[i]
-		}
-	}
-
-	// Validate required path params.
-	for _, requiredParam := range h.spec.PathParams {
-		if _, exists := params.Path[requiredParam]; !exists {
-			return nil, fmt.Errorf("path parameter %q", requiredParam)
-		}
-	}
-
-	// Extract only declared query params (if any declared).
-	if len(h.spec.QueryParams) > 0 {
-		query := r.URL.Query()
-		for _, declaredParam := range h.spec.QueryParams {
-			if values := query[declaredParam]; len(values) > 0 {
-				params.Query[declaredParam] = values[0]
-			}
-			// Missing query params result in empty string (not an error).
-		}
-	}
-	// If no query params declared, Query map stays empty.
-
-	return params, nil
 }
 
 // getRoccoError extracts a rocco ErrorDefinition from an error chain.

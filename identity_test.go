@@ -68,7 +68,7 @@ func TestAuthz_WithScopes_SingleGroup(t *testing.T) {
 
 			req := httptest.NewRequest("GET", "/test", nil)
 			w := httptest.NewRecorder()
-			engine.chiRouter.ServeHTTP(w, req)
+			engine.mux.ServeHTTP(w, req)
 
 			if w.Code != tt.expectStatus {
 				t.Errorf("expected status %d, got %d", tt.expectStatus, w.Code)
@@ -144,7 +144,7 @@ func TestAuthz_WithScopes_MultipleGroups(t *testing.T) {
 
 			req := httptest.NewRequest("GET", "/test", nil)
 			w := httptest.NewRecorder()
-			engine.chiRouter.ServeHTTP(w, req)
+			engine.mux.ServeHTTP(w, req)
 
 			if w.Code != tt.expectStatus {
 				t.Errorf("expected status %d, got %d", tt.expectStatus, w.Code)
@@ -214,7 +214,7 @@ func TestAuthz_WithRoles_SingleGroup(t *testing.T) {
 
 			req := httptest.NewRequest("GET", "/test", nil)
 			w := httptest.NewRecorder()
-			engine.chiRouter.ServeHTTP(w, req)
+			engine.mux.ServeHTTP(w, req)
 
 			if w.Code != tt.expectStatus {
 				t.Errorf("expected status %d, got %d", tt.expectStatus, w.Code)
@@ -290,7 +290,7 @@ func TestAuthz_WithRoles_MultipleGroups(t *testing.T) {
 
 			req := httptest.NewRequest("GET", "/test", nil)
 			w := httptest.NewRecorder()
-			engine.chiRouter.ServeHTTP(w, req)
+			engine.mux.ServeHTTP(w, req)
 
 			if w.Code != tt.expectStatus {
 				t.Errorf("expected status %d, got %d", tt.expectStatus, w.Code)
@@ -367,7 +367,7 @@ func TestAuthz_WithScopesAndRoles(t *testing.T) {
 
 			req := httptest.NewRequest("GET", "/test", nil)
 			w := httptest.NewRecorder()
-			engine.chiRouter.ServeHTTP(w, req)
+			engine.mux.ServeHTTP(w, req)
 
 			if w.Code != tt.expectStatus {
 				t.Errorf("expected status %d, got %d", tt.expectStatus, w.Code)
@@ -433,7 +433,7 @@ func TestAuthz_NoIdentityInContext(t *testing.T) {
 
 	req := httptest.NewRequest("GET", "/test", nil)
 	w := httptest.NewRecorder()
-	engine.chiRouter.ServeHTTP(w, req)
+	engine.mux.ServeHTTP(w, req)
 
 	// Should succeed because auth middleware adds identity to context
 	if w.Code != http.StatusOK {
@@ -547,7 +547,7 @@ func TestUsageLimit_BelowThreshold(t *testing.T) {
 
 	req := httptest.NewRequest("GET", "/test", nil)
 	w := httptest.NewRecorder()
-	engine.chiRouter.ServeHTTP(w, req)
+	engine.mux.ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Errorf("expected status 200, got %d", w.Code)
@@ -579,7 +579,7 @@ func TestUsageLimit_AtThreshold(t *testing.T) {
 
 	req := httptest.NewRequest("GET", "/test", nil)
 	w := httptest.NewRecorder()
-	engine.chiRouter.ServeHTTP(w, req)
+	engine.mux.ServeHTTP(w, req)
 
 	if w.Code != http.StatusTooManyRequests {
 		t.Errorf("expected status 429, got %d", w.Code)
@@ -611,7 +611,7 @@ func TestUsageLimit_AboveThreshold(t *testing.T) {
 
 	req := httptest.NewRequest("GET", "/test", nil)
 	w := httptest.NewRecorder()
-	engine.chiRouter.ServeHTTP(w, req)
+	engine.mux.ServeHTTP(w, req)
 
 	if w.Code != http.StatusTooManyRequests {
 		t.Errorf("expected status 429, got %d", w.Code)
@@ -680,7 +680,7 @@ func TestUsageLimit_MultipleLimits(t *testing.T) {
 
 			req := httptest.NewRequest("GET", "/test", nil)
 			w := httptest.NewRecorder()
-			engine.chiRouter.ServeHTTP(w, req)
+			engine.mux.ServeHTTP(w, req)
 
 			if w.Code != tt.expectStatus {
 				t.Errorf("expected status %d, got %d", tt.expectStatus, w.Code)
@@ -714,7 +714,7 @@ func TestUsageLimit_MissingStatKey(t *testing.T) {
 
 	req := httptest.NewRequest("GET", "/test", nil)
 	w := httptest.NewRecorder()
-	engine.chiRouter.ServeHTTP(w, req)
+	engine.mux.ServeHTTP(w, req)
 
 	// Missing key treated as 0, so request should succeed
 	if w.Code != http.StatusOK {
@@ -813,7 +813,7 @@ func TestUsageLimit_DynamicThreshold(t *testing.T) {
 
 			req := httptest.NewRequest("GET", "/test", nil)
 			w := httptest.NewRecorder()
-			engine.chiRouter.ServeHTTP(w, req)
+			engine.mux.ServeHTTP(w, req)
 
 			if w.Code != tt.expectStatus {
 				t.Errorf("expected status %d, got %d", tt.expectStatus, w.Code)

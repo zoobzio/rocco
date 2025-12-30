@@ -2,8 +2,12 @@ package rocco
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 )
+
+// noBodyTypeName is the sentinel type name for handlers without a request body.
+const noBodyTypeName = "NoBody"
 
 // Request holds all data needed by handler callbacks.
 // It embeds context and the underlying HTTP request for full access.
@@ -29,3 +33,32 @@ type Params struct {
 // NoBody represents an empty input for handlers that don't expect a request body.
 // Used for GET, HEAD, DELETE requests.
 type NoBody struct{}
+
+// extractParams extracts and validates required parameters from the request.
+func extractParams(_ context.Context, r *http.Request, pathParams, queryParams []string) (*Params, error) {
+	params := &Params{
+		Path:  make(map[string]string),
+		Query: make(map[string]string),
+	}
+
+	// Extract path params using Go 1.22+ PathValue.
+	for _, param := range pathParams {
+		if val := r.PathValue(param); val != "" {
+			params.Path[param] = val
+		} else {
+			return nil, fmt.Errorf("path parameter %q", param)
+		}
+	}
+
+	// Extract only declared query params.
+	if len(queryParams) > 0 {
+		query := r.URL.Query()
+		for _, declaredParam := range queryParams {
+			if values := query[declaredParam]; len(values) > 0 {
+				params.Query[declaredParam] = values[0]
+			}
+		}
+	}
+
+	return params, nil
+}

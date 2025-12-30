@@ -30,17 +30,17 @@ func TestMetadataToSchema(t *testing.T) {
 
 	schema := metadataToSchema(meta)
 
-	if schema.Type != "object" {
-		t.Errorf("expected type 'object', got %q", schema.Type)
+	if schema.Type == nil || schema.Type.String() != "object" {
+		t.Errorf("expected type 'object', got %v", schema.Type)
 	}
 	if len(schema.Properties) != 2 {
 		t.Errorf("expected 2 properties, got %d", len(schema.Properties))
 	}
-	if schema.Properties["name"].Type != "string" {
-		t.Errorf("expected name type 'string', got %q", schema.Properties["name"].Type)
+	if schema.Properties["name"].Type == nil || schema.Properties["name"].Type.String() != "string" {
+		t.Errorf("expected name type 'string', got %v", schema.Properties["name"].Type)
 	}
-	if schema.Properties["count"].Type != "integer" {
-		t.Errorf("expected count type 'integer', got %q", schema.Properties["count"].Type)
+	if schema.Properties["count"].Type == nil || schema.Properties["count"].Type.String() != "integer" {
+		t.Errorf("expected count type 'integer', got %v", schema.Properties["count"].Type)
 	}
 	// Name should be required, count should not (omitempty)
 	if len(schema.Required) != 1 || schema.Required[0] != "name" {
@@ -123,8 +123,12 @@ func TestGoTypeToSchema(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.goType, func(t *testing.T) {
 			schema := goTypeToSchema(tt.goType)
-			if schema.Type != tt.wantType {
-				t.Errorf("expected type %q, got %q", tt.wantType, schema.Type)
+			schemaType := ""
+			if schema.Type != nil {
+				schemaType = schema.Type.String()
+			}
+			if schemaType != tt.wantType {
+				t.Errorf("expected type %q, got %q", tt.wantType, schemaType)
 			}
 			if schema.Format != tt.wantFormat {
 				t.Errorf("expected format %q, got %q", tt.wantFormat, schema.Format)
@@ -244,8 +248,8 @@ func TestGenerateOpenAPI(t *testing.T) {
 	spec := engine.GenerateOpenAPI(nil)
 
 	// Check spec structure
-	if spec.OpenAPI != "3.0.3" {
-		t.Errorf("expected OpenAPI version '3.0.3', got %q", spec.OpenAPI)
+	if spec.OpenAPI != "3.1.0" {
+		t.Errorf("expected OpenAPI version '3.1.0', got %q", spec.OpenAPI)
 	}
 	if spec.Info.Title != "Test API" {
 		t.Errorf("expected title 'Test API', got %q", spec.Info.Title)
@@ -402,7 +406,7 @@ func TestApplyOpenAPITags_Description(t *testing.T) {
 		},
 	}
 
-	schema := &openapi.Schema{Type: "string"}
+	schema := &openapi.Schema{Type: openapi.NewSchemaType("string")}
 	applyOpenAPITags(schema, field)
 
 	if schema.Description != "User's full name" {
@@ -419,7 +423,7 @@ func TestApplyOpenAPITags_Format(t *testing.T) {
 		},
 	}
 
-	schema := &openapi.Schema{Type: "string"}
+	schema := &openapi.Schema{Type: openapi.NewSchemaType("string")}
 	applyOpenAPITags(schema, field)
 
 	if schema.Format != "email" {
@@ -451,7 +455,7 @@ func TestApplyOpenAPITags_Example(t *testing.T) {
 				},
 			}
 
-			schema := &openapi.Schema{Type: tt.schemaType}
+			schema := &openapi.Schema{Type: openapi.NewSchemaType(tt.schemaType)}
 			applyOpenAPITags(schema, field)
 
 			if schema.Example == nil {
@@ -509,7 +513,7 @@ func TestApplyOpenAPITags_Enum(t *testing.T) {
 				},
 			}
 
-			schema := &openapi.Schema{Type: tt.schemaType}
+			schema := &openapi.Schema{Type: openapi.NewSchemaType(tt.schemaType)}
 			applyOpenAPITags(schema, field)
 
 			if len(schema.Enum) != tt.wantLen {
@@ -528,7 +532,7 @@ func TestApplyOpenAPITags_NumericValidations(t *testing.T) {
 		},
 	}
 
-	schema := &openapi.Schema{Type: "integer"}
+	schema := &openapi.Schema{Type: openapi.NewSchemaType("integer")}
 	applyOpenAPITags(schema, field)
 
 	if schema.Minimum == nil || *schema.Minimum != 0 {
@@ -549,7 +553,7 @@ func TestApplyOpenAPITags_StringValidations(t *testing.T) {
 		},
 	}
 
-	schema := &openapi.Schema{Type: "string"}
+	schema := &openapi.Schema{Type: openapi.NewSchemaType("string")}
 	applyOpenAPITags(schema, field)
 
 	if schema.MinLength == nil || *schema.MinLength != 3 {
@@ -569,7 +573,7 @@ func TestApplyOpenAPITags_ArrayValidations(t *testing.T) {
 		},
 	}
 
-	schema := &openapi.Schema{Type: "array"}
+	schema := &openapi.Schema{Type: openapi.NewSchemaType("array")}
 	applyOpenAPITags(schema, field)
 
 	if schema.MinItems == nil || *schema.MinItems != 5 {
@@ -600,7 +604,7 @@ func TestApplyOpenAPITags_MultipleTagsCombined(t *testing.T) {
 		},
 	}
 
-	schema := &openapi.Schema{Type: "string"}
+	schema := &openapi.Schema{Type: openapi.NewSchemaType("string")}
 	applyOpenAPITags(schema, field)
 
 	if schema.Description != "User email address" {
@@ -834,7 +838,7 @@ func TestParseValidateTag_GteLte(t *testing.T) {
 		},
 	}
 
-	schema := &openapi.Schema{Type: "integer"}
+	schema := &openapi.Schema{Type: openapi.NewSchemaType("integer")}
 	applyOpenAPITags(schema, field)
 
 	if schema.Minimum == nil || *schema.Minimum != 0 {
@@ -854,20 +858,15 @@ func TestParseValidateTag_GtLt(t *testing.T) {
 		},
 	}
 
-	schema := &openapi.Schema{Type: "number"}
+	schema := &openapi.Schema{Type: openapi.NewSchemaType("number")}
 	applyOpenAPITags(schema, field)
 
-	if schema.Minimum == nil || *schema.Minimum != 0 {
-		t.Errorf("expected minimum 0 from gt, got %v", schema.Minimum)
+	// OpenAPI 3.1.0: exclusiveMinimum/Maximum are the actual bound values, not booleans
+	if schema.ExclusiveMinimum == nil || *schema.ExclusiveMinimum != 0 {
+		t.Errorf("expected exclusiveMinimum 0 from gt, got %v", schema.ExclusiveMinimum)
 	}
-	if schema.ExclusiveMinimum == nil || *schema.ExclusiveMinimum != true {
-		t.Errorf("expected exclusiveMinimum true from gt, got %v", schema.ExclusiveMinimum)
-	}
-	if schema.Maximum == nil || *schema.Maximum != 1 {
-		t.Errorf("expected maximum 1 from lt, got %v", schema.Maximum)
-	}
-	if schema.ExclusiveMaximum == nil || *schema.ExclusiveMaximum != true {
-		t.Errorf("expected exclusiveMaximum true from lt, got %v", schema.ExclusiveMaximum)
+	if schema.ExclusiveMaximum == nil || *schema.ExclusiveMaximum != 1 {
+		t.Errorf("expected exclusiveMaximum 1 from lt, got %v", schema.ExclusiveMaximum)
 	}
 }
 
@@ -880,7 +879,7 @@ func TestParseValidateTag_StringLen(t *testing.T) {
 		},
 	}
 
-	schema := &openapi.Schema{Type: "string"}
+	schema := &openapi.Schema{Type: openapi.NewSchemaType("string")}
 	applyOpenAPITags(schema, field)
 
 	if schema.MinLength == nil || *schema.MinLength != 5 {
@@ -900,7 +899,7 @@ func TestParseValidateTag_URLFormat(t *testing.T) {
 		},
 	}
 
-	schema := &openapi.Schema{Type: "string"}
+	schema := &openapi.Schema{Type: openapi.NewSchemaType("string")}
 	applyOpenAPITags(schema, field)
 
 	if schema.Format != "uri" {
@@ -921,7 +920,7 @@ func TestParseValidateTag_UUIDFormats(t *testing.T) {
 				},
 			}
 
-			schema := &openapi.Schema{Type: "string"}
+			schema := &openapi.Schema{Type: openapi.NewSchemaType("string")}
 			applyOpenAPITags(schema, field)
 
 			if schema.Format != "uuid" {
@@ -950,7 +949,7 @@ func TestParseValidateTag_IPFormats(t *testing.T) {
 				},
 			}
 
-			schema := &openapi.Schema{Type: "string"}
+			schema := &openapi.Schema{Type: openapi.NewSchemaType("string")}
 			applyOpenAPITags(schema, field)
 
 			if schema.Format != tt.format {
@@ -969,7 +968,7 @@ func TestParseValidateTag_DateTime(t *testing.T) {
 		},
 	}
 
-	schema := &openapi.Schema{Type: "string"}
+	schema := &openapi.Schema{Type: openapi.NewSchemaType("string")}
 	applyOpenAPITags(schema, field)
 
 	if schema.Format != "date-time" {

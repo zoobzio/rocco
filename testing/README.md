@@ -47,7 +47,7 @@ Captures HTTP responses with convenient access methods:
 
 ```go
 capture := NewResponseCapture()
-engine.chiRouter.ServeHTTP(capture, req)
+engine.mux.ServeHTTP(capture, req)
 
 if capture.StatusCode() != 200 {
     t.Errorf("expected 200, got %d", capture.StatusCode())

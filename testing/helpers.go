@@ -293,3 +293,187 @@ func AssertContentType(t testing.TB, capture *ResponseCapture, expected string) 
 		t.Errorf("expected Content-Type %q, got %q", expected, capture.ContentType())
 	}
 }
+
+// SSE Test Helpers
+
+// SSEEvent represents a parsed Server-Sent Event.
+type SSEEvent struct {
+	Event string // Event type (empty for data-only events)
+	Data  string // Raw data string
+	ID    string // Event ID (if present)
+}
+
+// DecodeJSON decodes the event data into the provided value.
+func (e *SSEEvent) DecodeJSON(v any) error {
+	return json.Unmarshal([]byte(e.Data), v)
+}
+
+// StreamCapture wraps a response recorder with SSE-specific methods.
+type StreamCapture struct {
+	*httptest.ResponseRecorder
+	flushed int
+}
+
+// NewStreamCapture creates a new StreamCapture.
+func NewStreamCapture() *StreamCapture {
+	return &StreamCapture{
+		ResponseRecorder: httptest.NewRecorder(),
+	}
+}
+
+// Flush implements http.Flusher.
+func (s *StreamCapture) Flush() {
+	s.flushed++
+}
+
+// FlushCount returns the number of times Flush was called.
+func (s *StreamCapture) FlushCount() int {
+	return s.flushed
+}
+
+// ContentType returns the Content-Type header value.
+func (s *StreamCapture) ContentType() string {
+	return s.Header().Get("Content-Type")
+}
+
+// IsSSE returns true if the response has SSE content type.
+func (s *StreamCapture) IsSSE() bool {
+	return s.ContentType() == "text/event-stream"
+}
+
+// ParseEvents parses all SSE events from the response body.
+func (s *StreamCapture) ParseEvents() []SSEEvent {
+	return ParseSSEEvents(s.Body.String())
+}
+
+// EventCount returns the number of data events in the response.
+func (s *StreamCapture) EventCount() int {
+	return len(s.ParseEvents())
+}
+
+// ParseSSEEvents parses SSE events from a string.
+func ParseSSEEvents(body string) []SSEEvent {
+	var events []SSEEvent
+	var currentEvent SSEEvent
+
+	lines := splitLines(body)
+	for _, line := range lines {
+		switch {
+		case line == "":
+			// Empty line marks end of event
+			if currentEvent.Data != "" {
+				events = append(events, currentEvent)
+				currentEvent = SSEEvent{}
+			}
+		case len(line) > 6 && line[:6] == "event:":
+			currentEvent.Event = trimPrefix(line, "event:")
+		case len(line) > 5 && line[:5] == "data:":
+			currentEvent.Data = trimPrefix(line, "data:")
+		case len(line) > 3 && line[:3] == "id:":
+			currentEvent.ID = trimPrefix(line, "id:")
+		case line[0] == ':':
+			// Comment, ignore
+		}
+	}
+
+	// Handle final event if no trailing newline
+	if currentEvent.Data != "" {
+		events = append(events, currentEvent)
+	}
+
+	return events
+}
+
+// splitLines splits a string into lines.
+func splitLines(s string) []string {
+	var lines []string
+	var current []byte
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\n' {
+			lines = append(lines, string(current))
+			current = nil
+		} else if s[i] != '\r' {
+			current = append(current, s[i])
+		}
+	}
+	if len(current) > 0 {
+		lines = append(lines, string(current))
+	}
+	return lines
+}
+
+// trimPrefix trims the prefix and leading/trailing whitespace.
+func trimPrefix(s, prefix string) string {
+	s = s[len(prefix):]
+	// Trim leading space
+	for s != "" && s[0] == ' ' {
+		s = s[1:]
+	}
+	// Trim trailing space
+	for s != "" && s[len(s)-1] == ' ' {
+		s = s[:len(s)-1]
+	}
+	return s
+}
+
+// ServeStream executes a streaming request and returns a StreamCapture.
+func ServeStream(engine *rocco.Engine, method, path string, body any) *StreamCapture {
+	builder := NewRequestBuilder(method, path)
+	if body != nil {
+		builder.WithJSON(body)
+	}
+	req := builder.Build()
+
+	capture := NewStreamCapture()
+	engine.Router().ServeHTTP(capture, req)
+	return capture
+}
+
+// ServeStreamWithContext executes a streaming request with a custom context.
+func ServeStreamWithContext(ctx context.Context, engine *rocco.Engine, method, path string, body any) *StreamCapture {
+	builder := NewRequestBuilder(method, path).WithContext(ctx)
+	if body != nil {
+		builder.WithJSON(body)
+	}
+	req := builder.Build()
+
+	capture := NewStreamCapture()
+	engine.Router().ServeHTTP(capture, req)
+	return capture
+}
+
+// ServeStreamWithHeaders executes a streaming request with custom headers.
+func ServeStreamWithHeaders(engine *rocco.Engine, method, path string, body any, headers map[string]string) *StreamCapture {
+	builder := NewRequestBuilder(method, path)
+	if body != nil {
+		builder.WithJSON(body)
+	}
+	for key, value := range headers {
+		builder.WithHeader(key, value)
+	}
+	req := builder.Build()
+
+	capture := NewStreamCapture()
+	engine.Router().ServeHTTP(capture, req)
+	return capture
+}
+
+// AssertSSE asserts the response is a valid SSE stream.
+func AssertSSE(t testing.TB, capture *StreamCapture) {
+	t.Helper()
+	if !capture.IsSSE() {
+		t.Errorf("expected Content-Type 'text/event-stream', got %q", capture.ContentType())
+	}
+	if capture.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d", capture.Code)
+	}
+}
+
+// AssertEventCount asserts the stream contains the expected number of events.
+func AssertEventCount(t testing.TB, capture *StreamCapture, expected int) {
+	t.Helper()
+	actual := capture.EventCount()
+	if actual != expected {
+		t.Errorf("expected %d events, got %d", expected, actual)
+	}
+}

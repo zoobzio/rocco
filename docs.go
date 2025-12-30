@@ -197,13 +197,13 @@ func parseValidateTag(validateTag string, goType string) map[string]any {
 			}
 		case "gt":
 			if isNumeric {
-				constraints["minimum"] = parseFloat64(param)
-				constraints["exclusiveMinimum"] = parseBool("true")
+				// OpenAPI 3.1.0: exclusiveMinimum is the actual bound value
+				constraints["exclusiveMinimum"] = parseFloat64(param)
 			}
 		case "lt":
 			if isNumeric {
-				constraints["maximum"] = parseFloat64(param)
-				constraints["exclusiveMaximum"] = parseBool("true")
+				// OpenAPI 3.1.0: exclusiveMaximum is the actual bound value
+				constraints["exclusiveMaximum"] = parseFloat64(param)
 			}
 
 		// String format validations
@@ -287,11 +287,11 @@ func applyOpenAPITags(schema *openapi.Schema, field sentinel.FieldMetadata) {
 					schema.Maximum = v
 				}
 			case "exclusiveMinimum":
-				if v, ok := value.(*bool); ok {
+				if v, ok := value.(*float64); ok {
 					schema.ExclusiveMinimum = v
 				}
 			case "exclusiveMaximum":
-				if v, ok := value.(*bool); ok {
+				if v, ok := value.(*float64); ok {
 					schema.ExclusiveMaximum = v
 				}
 			case "minLength":
@@ -332,14 +332,18 @@ func applyOpenAPITags(schema *openapi.Schema, field sentinel.FieldMetadata) {
 	}
 
 	if example := field.Tags["example"]; example != "" {
-		schema.Example = parseExample(example, schema.Type)
+		schemaType := ""
+		if schema.Type != nil {
+			schemaType = schema.Type.String()
+		}
+		schema.Example = parseExample(example, schemaType)
 	}
 }
 
 // metadataToSchema converts sentinel ModelMetadata to OpenAPI Schema
 func metadataToSchema(meta sentinel.ModelMetadata) *openapi.Schema {
 	schema := &openapi.Schema{
-		Type:       "object",
+		Type:       openapi.NewSchemaType("object"),
 		Properties: make(map[string]*openapi.Schema),
 	}
 
@@ -410,7 +414,7 @@ func goTypeToSchema(goType string) *openapi.Schema {
 	if strings.HasPrefix(goType, "[]") {
 		elementType := strings.TrimPrefix(goType, "[]")
 		return &openapi.Schema{
-			Type:  "array",
+			Type:  openapi.NewSchemaType("array"),
 			Items: goTypeToSchema(elementType),
 		}
 	}
@@ -418,7 +422,7 @@ func goTypeToSchema(goType string) *openapi.Schema {
 	// Handle maps
 	if strings.HasPrefix(goType, "map[") {
 		return &openapi.Schema{
-			Type:                 "object",
+			Type:                 openapi.NewSchemaType("object"),
 			AdditionalProperties: true,
 		}
 	}
@@ -426,16 +430,16 @@ func goTypeToSchema(goType string) *openapi.Schema {
 	// Basic type mapping
 	switch goType {
 	case "string":
-		return &openapi.Schema{Type: "string"}
+		return &openapi.Schema{Type: openapi.NewSchemaType("string")}
 	case "int", "int8", "int16", "int32", "int64",
 		"uint", "uint8", "uint16", "uint32", "uint64":
-		return &openapi.Schema{Type: "integer"}
+		return &openapi.Schema{Type: openapi.NewSchemaType("integer")}
 	case "float32", "float64":
-		return &openapi.Schema{Type: "number"}
+		return &openapi.Schema{Type: openapi.NewSchemaType("number")}
 	case "bool":
-		return &openapi.Schema{Type: "boolean"}
+		return &openapi.Schema{Type: openapi.NewSchemaType("boolean")}
 	case "time.Time":
-		return &openapi.Schema{Type: "string", Format: "date-time"}
+		return &openapi.Schema{Type: openapi.NewSchemaType("string"), Format: "date-time"}
 	default:
 		// Complex type - reference to component schema
 		// Extract just the type name (remove package prefix)
@@ -554,7 +558,7 @@ func isHandlerAccessible(handler Endpoint, identity Identity) bool {
 // If identity is provided, only handlers accessible to that identity will be included.
 func (e *Engine) GenerateOpenAPI(identity Identity) *openapi.OpenAPI {
 	spec := &openapi.OpenAPI{
-		OpenAPI: "3.0.3",
+		OpenAPI: "3.1.0",
 		Info:    e.spec.Info,
 		Tags:    e.spec.Tags,
 		Servers: e.spec.Servers,
@@ -602,11 +606,11 @@ func (e *Engine) GenerateOpenAPI(identity Identity) *openapi.OpenAPI {
 
 	// Add base ErrorResponse schema (used for untyped errors like 500)
 	spec.Components.Schemas["ErrorResponse"] = &openapi.Schema{
-		Type: "object",
+		Type: openapi.NewSchemaType("object"),
 		Properties: map[string]*openapi.Schema{
-			"code":    {Type: "string", Description: "Machine-readable error code"},
-			"message": {Type: "string", Description: "Human-readable error message"},
-			"details": {Type: "object", Description: "Optional additional error details"},
+			"code":    {Type: openapi.NewSchemaType("string"), Description: "Machine-readable error code"},
+			"message": {Type: openapi.NewSchemaType("string"), Description: "Human-readable error message"},
+			"details": {Type: openapi.NewSchemaType("object"), Description: "Optional additional error details"},
 		},
 		Required: []string{"code", "message"},
 	}
@@ -643,8 +647,8 @@ func (e *Engine) GenerateOpenAPI(identity Identity) *openapi.OpenAPI {
 
 		// Build properties for the error response
 		properties := map[string]*openapi.Schema{
-			"code":    {Type: "string", Description: "Machine-readable error code"},
-			"message": {Type: "string", Description: "Human-readable error message"},
+			"code":    {Type: openapi.NewSchemaType("string"), Description: "Machine-readable error code"},
+			"message": {Type: openapi.NewSchemaType("string"), Description: "Human-readable error message"},
 		}
 
 		// Add typed details if the error has a details type
@@ -658,7 +662,7 @@ func (e *Engine) GenerateOpenAPI(identity Identity) *openapi.OpenAPI {
 
 		// Create the typed error response schema
 		spec.Components.Schemas[schemaName] = &openapi.Schema{
-			Type:       "object",
+			Type:       openapi.NewSchemaType("object"),
 			Properties: properties,
 			Required:   []string{"code", "message"},
 		}
@@ -694,7 +698,7 @@ func (e *Engine) GenerateOpenAPI(identity Identity) *openapi.OpenAPI {
 				Name:     paramName,
 				In:       "path",
 				Required: true,
-				Schema:   &openapi.Schema{Type: "string"},
+				Schema:   &openapi.Schema{Type: openapi.NewSchemaType("string")},
 			})
 		}
 
@@ -704,7 +708,7 @@ func (e *Engine) GenerateOpenAPI(identity Identity) *openapi.OpenAPI {
 				Name:     paramName,
 				In:       "query",
 				Required: false,
-				Schema:   &openapi.Schema{Type: "string"},
+				Schema:   &openapi.Schema{Type: openapi.NewSchemaType("string")},
 			})
 		}
 
@@ -731,13 +735,29 @@ func (e *Engine) GenerateOpenAPI(identity Identity) *openapi.OpenAPI {
 			collectSchemas(outputMeta)
 		}
 
-		operation.Responses[fmt.Sprintf("%d", handlerSpec.SuccessStatus)] = openapi.Response{
-			Description: "Success",
-			Content: map[string]openapi.MediaType{
-				"application/json": {
-					Schema: &openapi.Schema{Ref: "#/components/schemas/" + handlerSpec.OutputTypeName},
+		if handlerSpec.IsStream {
+			// SSE stream response
+			operation.Responses[fmt.Sprintf("%d", handlerSpec.SuccessStatus)] = openapi.Response{
+				Description: "Server-Sent Events stream",
+				Content: map[string]openapi.MediaType{
+					"text/event-stream": {
+						Schema: &openapi.Schema{
+							Type:        openapi.NewSchemaType("string"),
+							Description: fmt.Sprintf("SSE stream emitting %s events as JSON", handlerSpec.OutputTypeName),
+						},
+					},
 				},
-			},
+			}
+		} else {
+			// Standard JSON response
+			operation.Responses[fmt.Sprintf("%d", handlerSpec.SuccessStatus)] = openapi.Response{
+				Description: "Success",
+				Content: map[string]openapi.MediaType{
+					"application/json": {
+						Schema: &openapi.Schema{Ref: "#/components/schemas/" + handlerSpec.OutputTypeName},
+					},
+				},
+			}
 		}
 
 		// Add error responses from handler's declared error definitions
