@@ -509,3 +509,339 @@ func TestEngine_WithTag_MultipleTags(t *testing.T) {
 		}
 	}
 }
+
+// Tests for default handlers (/openapi and /docs)
+
+func TestEngine_DefaultHandlers_OpenAPI(t *testing.T) {
+	engine := newTestEngine()
+
+	// Register a handler to trigger default handlers setup
+	handler := NewHandler[NoBody, testOutput](
+		"test",
+		"GET",
+		"/test",
+		func(_ *Request[NoBody]) (testOutput, error) {
+			return testOutput{Message: "OK"}, nil
+		},
+	)
+	engine.WithHandlers(handler)
+
+	// Test /openapi endpoint
+	req := httptest.NewRequest("GET", "/openapi", nil)
+	w := httptest.NewRecorder()
+	engine.mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d", w.Code)
+	}
+	if ct := w.Header().Get("Content-Type"); ct != "application/json" {
+		t.Errorf("expected Content-Type 'application/json', got %q", ct)
+	}
+
+	// Verify it's valid JSON
+	var spec map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &spec); err != nil {
+		t.Errorf("response is not valid JSON: %v", err)
+	}
+
+	// Verify OpenAPI structure
+	if spec["openapi"] != "3.1.0" {
+		t.Errorf("expected openapi version '3.1.0', got %v", spec["openapi"])
+	}
+}
+
+func TestEngine_DefaultHandlers_OpenAPI_Cached(t *testing.T) {
+	engine := newTestEngine()
+
+	handler := NewHandler[NoBody, testOutput](
+		"test",
+		"GET",
+		"/test",
+		func(_ *Request[NoBody]) (testOutput, error) {
+			return testOutput{Message: "OK"}, nil
+		},
+	)
+	engine.WithHandlers(handler)
+
+	// First request
+	req1 := httptest.NewRequest("GET", "/openapi", nil)
+	w1 := httptest.NewRecorder()
+	engine.mux.ServeHTTP(w1, req1)
+
+	// Second request (should return cached)
+	req2 := httptest.NewRequest("GET", "/openapi", nil)
+	w2 := httptest.NewRecorder()
+	engine.mux.ServeHTTP(w2, req2)
+
+	// Both should return the same content
+	if w1.Body.String() != w2.Body.String() {
+		t.Error("expected cached OpenAPI spec to be identical")
+	}
+}
+
+func TestEngine_DefaultHandlers_Docs(t *testing.T) {
+	engine := newTestEngine()
+
+	handler := NewHandler[NoBody, testOutput](
+		"test",
+		"GET",
+		"/test",
+		func(_ *Request[NoBody]) (testOutput, error) {
+			return testOutput{Message: "OK"}, nil
+		},
+	)
+	engine.WithHandlers(handler)
+
+	// Test /docs endpoint
+	req := httptest.NewRequest("GET", "/docs", nil)
+	w := httptest.NewRecorder()
+	engine.mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d", w.Code)
+	}
+	if ct := w.Header().Get("Content-Type"); ct != "text/html; charset=utf-8" {
+		t.Errorf("expected Content-Type 'text/html; charset=utf-8', got %q", ct)
+	}
+
+	// Verify it contains Scalar API reference
+	body := w.Body.String()
+	if !contains(body, "api-reference") {
+		t.Error("expected docs to contain 'api-reference'")
+	}
+	if !contains(body, "scalar") {
+		t.Error("expected docs to contain 'scalar'")
+	}
+}
+
+// Tests for authentication middleware
+
+func TestEngine_AuthMiddleware_Success(t *testing.T) {
+	// Create engine with auth extractor
+	engine := NewEngine("localhost", 8080, func(_ context.Context, r *http.Request) (Identity, error) {
+		// Extract token from header
+		token := r.Header.Get("Authorization")
+		if token == "Bearer valid-token" {
+			return &testIdentity{id: "user-123", tenantID: "tenant-456"}, nil
+		}
+		return nil, errors.New("invalid token")
+	})
+
+	handler := NewHandler[NoBody, testOutput](
+		"protected",
+		"GET",
+		"/protected",
+		func(req *Request[NoBody]) (testOutput, error) {
+			return testOutput{Message: "Hello " + req.Identity.ID()}, nil
+		},
+	).WithAuthentication()
+
+	engine.WithHandlers(handler)
+
+	// Request with valid token
+	req := httptest.NewRequest("GET", "/protected", nil)
+	req.Header.Set("Authorization", "Bearer valid-token")
+	w := httptest.NewRecorder()
+	engine.mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d", w.Code)
+	}
+
+	var resp testOutput
+	json.Unmarshal(w.Body.Bytes(), &resp)
+	if resp.Message != "Hello user-123" {
+		t.Errorf("expected 'Hello user-123', got %q", resp.Message)
+	}
+}
+
+func TestEngine_AuthMiddleware_Failure(t *testing.T) {
+	engine := NewEngine("localhost", 8080, func(_ context.Context, _ *http.Request) (Identity, error) {
+		return nil, errors.New("authentication failed")
+	})
+
+	handler := NewHandler[NoBody, testOutput](
+		"protected",
+		"GET",
+		"/protected",
+		func(_ *Request[NoBody]) (testOutput, error) {
+			return testOutput{Message: "OK"}, nil
+		},
+	).WithAuthentication()
+
+	engine.WithHandlers(handler)
+
+	req := httptest.NewRequest("GET", "/protected", nil)
+	w := httptest.NewRecorder()
+	engine.mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("expected status 401, got %d", w.Code)
+	}
+}
+
+// Tests for authorization middleware edge cases
+
+func TestEngine_AuthzMiddleware_InsufficientScope(t *testing.T) {
+	// Engine with auth that returns identity without required scope
+	engine := NewEngine("localhost", 8080, func(_ context.Context, _ *http.Request) (Identity, error) {
+		return &testIdentity{
+			id:       "user-1",
+			tenantID: "tenant-1",
+			scopes:   []string{"read"}, // Has read but not admin
+		}, nil
+	})
+
+	handler := NewHandler[NoBody, testOutput](
+		"scoped",
+		"GET",
+		"/scoped",
+		func(_ *Request[NoBody]) (testOutput, error) {
+			return testOutput{Message: "OK"}, nil
+		},
+	).WithScopes("admin") // Requires admin scope
+
+	engine.WithHandlers(handler)
+
+	req := httptest.NewRequest("GET", "/scoped", nil)
+	w := httptest.NewRecorder()
+	engine.mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Errorf("expected status 403, got %d", w.Code)
+	}
+}
+
+func TestEngine_AuthzMiddleware_InsufficientRole(t *testing.T) {
+	engine := NewEngine("localhost", 8080, func(_ context.Context, _ *http.Request) (Identity, error) {
+		return &testIdentity{
+			id:       "user-1",
+			tenantID: "tenant-1",
+			roles:    []string{"user"}, // Has user but not admin
+		}, nil
+	})
+
+	handler := NewHandler[NoBody, testOutput](
+		"role-protected",
+		"GET",
+		"/admin",
+		func(_ *Request[NoBody]) (testOutput, error) {
+			return testOutput{Message: "OK"}, nil
+		},
+	).WithRoles("admin") // Requires admin role
+
+	engine.WithHandlers(handler)
+
+	req := httptest.NewRequest("GET", "/admin", nil)
+	w := httptest.NewRecorder()
+	engine.mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Errorf("expected status 403, got %d", w.Code)
+	}
+}
+
+// Tests for usage limit middleware edge cases
+
+func TestEngine_UsageLimitMiddleware_LimitExceeded(t *testing.T) {
+	engine := NewEngine("localhost", 8080, func(_ context.Context, _ *http.Request) (Identity, error) {
+		return &testIdentity{
+			id:       "user-1",
+			tenantID: "tenant-1",
+			stats:    map[string]int{"requests": 150}, // Over limit
+		}, nil
+	})
+
+	handler := NewHandler[NoBody, testOutput](
+		"limited",
+		"GET",
+		"/limited",
+		func(_ *Request[NoBody]) (testOutput, error) {
+			return testOutput{Message: "OK"}, nil
+		},
+	).WithUsageLimit("requests", func(_ Identity) int { return 100 })
+
+	engine.WithHandlers(handler)
+
+	req := httptest.NewRequest("GET", "/limited", nil)
+	w := httptest.NewRecorder()
+	engine.mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusTooManyRequests {
+		t.Errorf("expected status 429, got %d", w.Code)
+	}
+}
+
+func TestEngine_UsageLimitMiddleware_NilStats(t *testing.T) {
+	engine := NewEngine("localhost", 8080, func(_ context.Context, _ *http.Request) (Identity, error) {
+		return &testIdentity{
+			id:       "user-1",
+			tenantID: "tenant-1",
+			stats:    nil, // No stats
+		}, nil
+	})
+
+	handler := NewHandler[NoBody, testOutput](
+		"limited",
+		"GET",
+		"/limited",
+		func(_ *Request[NoBody]) (testOutput, error) {
+			return testOutput{Message: "OK"}, nil
+		},
+	).WithUsageLimit("requests", func(_ Identity) int { return 100 })
+
+	engine.WithHandlers(handler)
+
+	req := httptest.NewRequest("GET", "/limited", nil)
+	w := httptest.NewRecorder()
+	engine.mux.ServeHTTP(w, req)
+
+	// Should succeed since nil stats means 0 usage
+	if w.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d", w.Code)
+	}
+}
+
+func TestEngine_UsageLimitMiddleware_MissingStatKey(t *testing.T) {
+	engine := NewEngine("localhost", 8080, func(_ context.Context, _ *http.Request) (Identity, error) {
+		return &testIdentity{
+			id:       "user-1",
+			tenantID: "tenant-1",
+			stats:    map[string]int{"other_key": 50}, // Different key
+		}, nil
+	})
+
+	handler := NewHandler[NoBody, testOutput](
+		"limited",
+		"GET",
+		"/limited",
+		func(_ *Request[NoBody]) (testOutput, error) {
+			return testOutput{Message: "OK"}, nil
+		},
+	).WithUsageLimit("requests", func(_ Identity) int { return 100 })
+
+	engine.WithHandlers(handler)
+
+	req := httptest.NewRequest("GET", "/limited", nil)
+	w := httptest.NewRecorder()
+	engine.mux.ServeHTTP(w, req)
+
+	// Should succeed since missing key means 0 usage
+	if w.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d", w.Code)
+	}
+}
+
+// Helper function
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsHelper(s, substr))
+}
+
+func containsHelper(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
+}

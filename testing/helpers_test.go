@@ -305,3 +305,285 @@ func TestAssertContentType_Success(t *testing.T) {
 	// Should not panic or fail for matching type
 	AssertContentType(t, capture, "application/json")
 }
+
+// Streaming helper tests
+
+func TestStreamCapture(t *testing.T) {
+	capture := NewStreamCapture()
+
+	// Write SSE headers and data
+	capture.Header().Set("Content-Type", "text/event-stream")
+	capture.WriteHeader(http.StatusOK)
+	capture.Write([]byte("event: update\ndata: {\"message\":\"hello\"}\n\n"))
+	capture.Flush()
+
+	if !capture.IsSSE() {
+		t.Error("expected IsSSE to return true")
+	}
+	if capture.ContentType() != "text/event-stream" {
+		t.Errorf("expected Content-Type 'text/event-stream', got %q", capture.ContentType())
+	}
+	if capture.FlushCount() != 1 {
+		t.Errorf("expected 1 flush, got %d", capture.FlushCount())
+	}
+}
+
+func TestStreamCapture_ParseEvents(t *testing.T) {
+	capture := NewStreamCapture()
+	capture.Header().Set("Content-Type", "text/event-stream")
+	capture.WriteHeader(http.StatusOK)
+
+	// Write multiple events
+	capture.Write([]byte("data: {\"count\":1}\n\n"))
+	capture.Write([]byte("event: custom\ndata: {\"count\":2}\n\n"))
+	capture.Write([]byte("data: {\"count\":3}\n\n"))
+
+	events := capture.ParseEvents()
+	if len(events) != 3 {
+		t.Fatalf("expected 3 events, got %d", len(events))
+	}
+
+	// First event - data only
+	if events[0].Event != "" {
+		t.Errorf("expected empty event type, got %q", events[0].Event)
+	}
+	if events[0].Data != `{"count":1}` {
+		t.Errorf("unexpected data: %q", events[0].Data)
+	}
+
+	// Second event - named event
+	if events[1].Event != "custom" {
+		t.Errorf("expected event type 'custom', got %q", events[1].Event)
+	}
+
+	// Third event - data only
+	if events[2].Data != `{"count":3}` {
+		t.Errorf("unexpected data: %q", events[2].Data)
+	}
+}
+
+func TestStreamCapture_EventCount(t *testing.T) {
+	capture := NewStreamCapture()
+	capture.WriteHeader(http.StatusOK)
+	capture.Write([]byte("data: event1\n\ndata: event2\n\ndata: event3\n\n"))
+
+	count := capture.EventCount()
+	if count != 3 {
+		t.Errorf("expected 3 events, got %d", count)
+	}
+}
+
+func TestParseSSEEvents(t *testing.T) {
+	tests := []struct {
+		name     string
+		body     string
+		expected []SSEEvent
+	}{
+		{
+			name:     "empty body",
+			body:     "",
+			expected: []SSEEvent{},
+		},
+		{
+			name: "single data event",
+			body: "data: hello\n\n",
+			expected: []SSEEvent{
+				{Data: "hello"},
+			},
+		},
+		{
+			name: "named event",
+			body: "event: message\ndata: test\n\n",
+			expected: []SSEEvent{
+				{Event: "message", Data: "test"},
+			},
+		},
+		{
+			name: "event with id",
+			body: "id: 123\ndata: test\n\n",
+			expected: []SSEEvent{
+				{ID: "123", Data: "test"},
+			},
+		},
+		{
+			name: "multiple events",
+			body: "data: first\n\ndata: second\n\n",
+			expected: []SSEEvent{
+				{Data: "first"},
+				{Data: "second"},
+			},
+		},
+		{
+			name: "event with comment",
+			body: ": this is a comment\ndata: hello\n\n",
+			expected: []SSEEvent{
+				{Data: "hello"},
+			},
+		},
+		{
+			name: "no trailing newline",
+			body: "data: final",
+			expected: []SSEEvent{
+				{Data: "final"},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			events := ParseSSEEvents(tt.body)
+			if len(events) != len(tt.expected) {
+				t.Fatalf("expected %d events, got %d", len(tt.expected), len(events))
+			}
+			for i, expected := range tt.expected {
+				if events[i].Event != expected.Event {
+					t.Errorf("event[%d].Event = %q, want %q", i, events[i].Event, expected.Event)
+				}
+				if events[i].Data != expected.Data {
+					t.Errorf("event[%d].Data = %q, want %q", i, events[i].Data, expected.Data)
+				}
+				if events[i].ID != expected.ID {
+					t.Errorf("event[%d].ID = %q, want %q", i, events[i].ID, expected.ID)
+				}
+			}
+		})
+	}
+}
+
+func TestSSEEvent_DecodeJSON(t *testing.T) {
+	event := SSEEvent{Data: `{"name":"test","value":42}`}
+
+	var result struct {
+		Name  string `json:"name"`
+		Value int    `json:"value"`
+	}
+
+	if err := event.DecodeJSON(&result); err != nil {
+		t.Fatalf("failed to decode JSON: %v", err)
+	}
+	if result.Name != "test" {
+		t.Errorf("expected name 'test', got %q", result.Name)
+	}
+	if result.Value != 42 {
+		t.Errorf("expected value 42, got %d", result.Value)
+	}
+}
+
+type streamOutput struct {
+	Message string `json:"message"`
+	Count   int    `json:"count"`
+}
+
+func TestServeStream(t *testing.T) {
+	engine := TestEngine()
+
+	handler := rocco.NewStreamHandler[rocco.NoBody, streamOutput](
+		"test-stream",
+		"GET",
+		"/events",
+		func(_ *rocco.Request[rocco.NoBody], stream rocco.Stream[streamOutput]) error {
+			stream.Send(streamOutput{Message: "hello", Count: 1})
+			stream.Send(streamOutput{Message: "world", Count: 2})
+			return nil
+		},
+	)
+	engine.WithHandlers(handler)
+
+	capture := ServeStream(engine, "GET", "/events", nil)
+
+	if !capture.IsSSE() {
+		t.Error("expected SSE response")
+	}
+
+	events := capture.ParseEvents()
+	if len(events) != 2 {
+		t.Fatalf("expected 2 events, got %d", len(events))
+	}
+}
+
+func TestServeStreamWithContext(t *testing.T) {
+	engine := TestEngine()
+
+	handler := rocco.NewStreamHandler[rocco.NoBody, streamOutput](
+		"test-stream",
+		"GET",
+		"/events",
+		func(_ *rocco.Request[rocco.NoBody], stream rocco.Stream[streamOutput]) error {
+			return stream.Send(streamOutput{Message: "test", Count: 1})
+		},
+	)
+	engine.WithHandlers(handler)
+
+	ctx := context.Background()
+	capture := ServeStreamWithContext(ctx, engine, "GET", "/events", nil)
+
+	if capture.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d", capture.Code)
+	}
+}
+
+func TestServeStreamWithHeaders(t *testing.T) {
+	engine := TestEngine()
+
+	var receivedToken string
+	handler := rocco.NewStreamHandler[rocco.NoBody, streamOutput](
+		"test-stream",
+		"GET",
+		"/events",
+		func(req *rocco.Request[rocco.NoBody], stream rocco.Stream[streamOutput]) error {
+			receivedToken = req.Header.Get("Authorization")
+			return stream.Send(streamOutput{Message: "ok", Count: 1})
+		},
+	)
+	engine.WithHandlers(handler)
+
+	headers := map[string]string{"Authorization": "Bearer stream-token"}
+	capture := ServeStreamWithHeaders(engine, "GET", "/events", nil, headers)
+
+	if capture.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d", capture.Code)
+	}
+	if receivedToken != "Bearer stream-token" {
+		t.Errorf("expected token 'Bearer stream-token', got %q", receivedToken)
+	}
+}
+
+func TestAssertSSE(t *testing.T) {
+	capture := NewStreamCapture()
+	capture.Header().Set("Content-Type", "text/event-stream")
+	capture.WriteHeader(http.StatusOK)
+
+	// Should not fail
+	AssertSSE(t, capture)
+}
+
+func TestAssertEventCount(t *testing.T) {
+	capture := NewStreamCapture()
+	capture.WriteHeader(http.StatusOK)
+	capture.Write([]byte("data: one\n\ndata: two\n\n"))
+
+	// Should not fail
+	AssertEventCount(t, capture, 2)
+}
+
+func TestDecodeJSON(t *testing.T) {
+	capture := NewResponseCapture()
+	capture.WriteHeader(http.StatusOK)
+	capture.Write([]byte(`{"name":"test","count":42}`))
+
+	var result struct {
+		Name  string `json:"name"`
+		Count int    `json:"count"`
+	}
+
+	if err := capture.DecodeJSON(&result); err != nil {
+		t.Fatalf("failed to decode JSON: %v", err)
+	}
+
+	if result.Name != "test" {
+		t.Errorf("expected name 'test', got %q", result.Name)
+	}
+	if result.Count != 42 {
+		t.Errorf("expected count 42, got %d", result.Count)
+	}
+}

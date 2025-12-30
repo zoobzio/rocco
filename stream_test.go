@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -521,3 +522,293 @@ func parseSSEEvents(body string) []map[string]any {
 
 	return events
 }
+
+// Additional tests for error paths
+
+func TestStream_SendEvent_StreamAlreadyClosed(t *testing.T) {
+	stream := &sseStream[streamEvent]{
+		w:       newFlushRecorder(),
+		flusher: newFlushRecorder(),
+		done:    make(chan struct{}),
+		closed:  true, // Already closed
+	}
+
+	err := stream.SendEvent("test", streamEvent{Message: "test", Count: 1})
+	if err == nil {
+		t.Error("expected error when sending on closed stream")
+	}
+	if !strings.Contains(err.Error(), "stream closed") {
+		t.Errorf("expected 'stream closed' error, got %q", err.Error())
+	}
+}
+
+func TestStream_SendComment_StreamAlreadyClosed(t *testing.T) {
+	stream := &sseStream[streamEvent]{
+		w:       newFlushRecorder(),
+		flusher: newFlushRecorder(),
+		done:    make(chan struct{}),
+		closed:  true, // Already closed
+	}
+
+	err := stream.SendComment("keep-alive")
+	if err == nil {
+		t.Error("expected error when sending comment on closed stream")
+	}
+	if !strings.Contains(err.Error(), "stream closed") {
+		t.Errorf("expected 'stream closed' error, got %q", err.Error())
+	}
+}
+
+func TestStream_SendComment_ClientDisconnected(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // Cancel immediately
+
+	stream := &sseStream[streamEvent]{
+		w:       newFlushRecorder(),
+		flusher: newFlushRecorder(),
+		done:    ctx.Done(),
+	}
+
+	err := stream.SendComment("keep-alive")
+	if err == nil {
+		t.Error("expected error when client disconnected")
+	}
+	if !strings.Contains(err.Error(), "client disconnected") {
+		t.Errorf("expected 'client disconnected' error, got %q", err.Error())
+	}
+}
+
+func TestStream_SendEvent_MarshalError(t *testing.T) {
+	stream := &sseStream[chan int]{
+		w:       newFlushRecorder(),
+		flusher: newFlushRecorder(),
+		done:    make(chan struct{}),
+	}
+
+	// Channels cannot be marshaled to JSON
+	err := stream.SendEvent("test", make(chan int))
+	if err == nil {
+		t.Error("expected marshal error")
+	}
+	if !strings.Contains(err.Error(), "failed to marshal") {
+		t.Errorf("expected 'failed to marshal' error, got %q", err.Error())
+	}
+}
+
+// errorWriter is a ResponseWriter that returns errors on Write
+type errorWriter struct {
+	*httptest.ResponseRecorder
+	failOnWrite bool
+}
+
+func (e *errorWriter) Write(b []byte) (int, error) {
+	if e.failOnWrite {
+		return 0, errWriteFailed
+	}
+	return e.ResponseRecorder.Write(b)
+}
+
+func (e *errorWriter) Flush() {}
+
+var errWriteFailed = errors.New("write failed")
+
+func TestStream_SendEvent_WriteError(t *testing.T) {
+	ew := &errorWriter{
+		ResponseRecorder: httptest.NewRecorder(),
+		failOnWrite:      true,
+	}
+
+	stream := &sseStream[streamEvent]{
+		w:       ew,
+		flusher: ew,
+		done:    make(chan struct{}),
+	}
+
+	err := stream.SendEvent("test", streamEvent{Message: "test", Count: 1})
+	if err == nil {
+		t.Error("expected write error")
+	}
+	if !strings.Contains(err.Error(), "failed to write") {
+		t.Errorf("expected 'failed to write' error, got %q", err.Error())
+	}
+	// Stream should be marked closed after write error
+	if !stream.closed {
+		t.Error("expected stream to be closed after write error")
+	}
+}
+
+func TestStream_SendComment_WriteError(t *testing.T) {
+	ew := &errorWriter{
+		ResponseRecorder: httptest.NewRecorder(),
+		failOnWrite:      true,
+	}
+
+	stream := &sseStream[streamEvent]{
+		w:       ew,
+		flusher: ew,
+		done:    make(chan struct{}),
+	}
+
+	err := stream.SendComment("keep-alive")
+	if err == nil {
+		t.Error("expected write error")
+	}
+	if !strings.Contains(err.Error(), "failed to write") {
+		t.Errorf("expected 'failed to write' error, got %q", err.Error())
+	}
+	if !stream.closed {
+		t.Error("expected stream to be closed after write error")
+	}
+}
+
+// minimalResponseWriter is a ResponseWriter that does NOT implement http.Flusher
+type minimalResponseWriter struct {
+	header http.Header
+	body   bytes.Buffer
+	code   int
+}
+
+func newMinimalResponseWriter() *minimalResponseWriter {
+	return &minimalResponseWriter{
+		header: make(http.Header),
+		code:   200,
+	}
+}
+
+func (m *minimalResponseWriter) Header() http.Header {
+	return m.header
+}
+
+func (m *minimalResponseWriter) Write(b []byte) (int, error) {
+	return m.body.Write(b)
+}
+
+func (m *minimalResponseWriter) WriteHeader(code int) {
+	m.code = code
+}
+
+func TestStreamHandler_Process_NonFlusher(t *testing.T) {
+	handler := NewStreamHandler[NoBody, streamEvent](
+		"test-stream",
+		"GET",
+		"/events",
+		func(_ *Request[NoBody], _ Stream[streamEvent]) error {
+			return nil
+		},
+	)
+
+	req := httptest.NewRequest("GET", "/events", nil)
+	// Use a ResponseWriter that does NOT implement http.Flusher
+	w := newMinimalResponseWriter()
+
+	status, err := handler.Process(context.Background(), req, w)
+	if err == nil {
+		t.Error("expected error for non-flusher")
+	}
+	if status != http.StatusInternalServerError {
+		t.Errorf("expected status 500, got %d", status)
+	}
+	if !strings.Contains(err.Error(), "streaming not supported") {
+		t.Errorf("expected 'streaming not supported' error, got %q", err.Error())
+	}
+}
+
+func TestStreamHandler_Process_HandlerReturnsRoccoError(t *testing.T) {
+	handler := NewStreamHandler[NoBody, streamEvent](
+		"test-stream",
+		"GET",
+		"/events",
+		func(_ *Request[NoBody], _ Stream[streamEvent]) error {
+			return ErrBadRequest.WithMessage("bad stream request")
+		},
+	)
+
+	req := httptest.NewRequest("GET", "/events", nil)
+	w := newFlushRecorder()
+
+	status, err := handler.Process(context.Background(), req, w)
+	// Status is still 200 because headers already sent
+	if status != http.StatusOK {
+		t.Errorf("expected status 200 (headers already sent), got %d", status)
+	}
+	if err == nil {
+		t.Error("expected error to be returned")
+	}
+}
+
+func TestStreamHandler_Process_HandlerReturnsGenericError(t *testing.T) {
+	handler := NewStreamHandler[NoBody, streamEvent](
+		"test-stream",
+		"GET",
+		"/events",
+		func(_ *Request[NoBody], _ Stream[streamEvent]) error {
+			return errors.New("something went wrong")
+		},
+	)
+
+	req := httptest.NewRequest("GET", "/events", nil)
+	w := newFlushRecorder()
+
+	status, err := handler.Process(context.Background(), req, w)
+	if status != http.StatusOK {
+		t.Errorf("expected status 200 (headers already sent), got %d", status)
+	}
+	if err == nil {
+		t.Error("expected error to be returned")
+	}
+}
+
+func TestStreamHandler_Process_BodyReadError(t *testing.T) {
+	handler := NewStreamHandler[streamInput, streamEvent](
+		"test-stream",
+		"POST",
+		"/events",
+		func(_ *Request[streamInput], _ Stream[streamEvent]) error {
+			return nil
+		},
+	)
+
+	req := httptest.NewRequest("POST", "/events", &errorReader{})
+	w := newFlushRecorder()
+
+	status, err := handler.Process(context.Background(), req, w)
+	if err == nil {
+		t.Error("expected body read error")
+	}
+	if status != http.StatusBadRequest {
+		t.Errorf("expected status 400, got %d", status)
+	}
+}
+
+// errorReader is defined in handler_test.go
+
+func TestStreamHandler_Process_WithIdentityInContext(t *testing.T) {
+	var receivedID string
+	handler := NewStreamHandler[NoBody, streamEvent](
+		"test-stream",
+		"GET",
+		"/events",
+		func(req *Request[NoBody], stream Stream[streamEvent]) error {
+			receivedID = req.Identity.ID()
+			return stream.Send(streamEvent{Message: "hello", Count: 1})
+		},
+	)
+
+	ctx := context.WithValue(context.Background(), identityContextKey, &testIdentity{
+		id:       "user-123",
+		tenantID: "tenant-456",
+	})
+
+	req := httptest.NewRequest("GET", "/events", nil).WithContext(ctx)
+	w := newFlushRecorder()
+
+	_, err := handler.Process(ctx, req, w)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if receivedID != "user-123" {
+		t.Errorf("expected identity ID 'user-123', got %q", receivedID)
+	}
+}
+
