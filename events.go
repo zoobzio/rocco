@@ -88,6 +88,14 @@ var (
 	// RequestResponseMarshalError is emitted when marshaling the response fails.
 	// Fields: HandlerNameKey, ErrorKey.
 	RequestResponseMarshalError = capitan.NewSignal("http.request.response.marshal.error", "Failed to marshal response to JSON")
+
+	// RequestBodyCloseError is emitted when closing the request body fails.
+	// Fields: HandlerNameKey, ErrorKey.
+	RequestBodyCloseError = capitan.NewSignal("http.request.body.close.error", "Failed to close request body stream")
+
+	// ResponseWriteError is emitted when writing the response body fails.
+	// Fields: HandlerNameKey, ErrorKey.
+	ResponseWriteError = capitan.NewSignal("http.response.write.error", "Failed to write response body to client")
 )
 
 // Authentication signals.

@@ -62,7 +62,7 @@ func (h *Handler[In, Out]) Process(ctx context.Context, r *http.Request, w http.
 			HandlerNameKey.Field(h.spec.Name),
 			ErrorKey.Field(err.Error()),
 		)
-		writeError(w, ErrUnprocessableEntity.WithMessage("invalid parameters").WithCause(err))
+		writeError(ctx, w, ErrUnprocessableEntity.WithMessage("invalid parameters").WithCause(err), h.spec.Name)
 		return http.StatusUnprocessableEntity, err
 	}
 
@@ -83,19 +83,24 @@ func (h *Handler[In, Out]) Process(ctx context.Context, r *http.Request, w http.
 					HandlerNameKey.Field(h.spec.Name),
 					ErrorKey.Field("payload too large"),
 				)
-				writeError(w, ErrPayloadTooLarge.WithDetails(PayloadTooLargeDetails{
+				writeError(ctx, w, ErrPayloadTooLarge.WithDetails(PayloadTooLargeDetails{
 					MaxSize: h.maxBodySize,
-				}))
+				}), h.spec.Name)
 				return http.StatusRequestEntityTooLarge, readErr
 			}
 			capitan.Error(ctx, RequestBodyReadError,
 				HandlerNameKey.Field(h.spec.Name),
 				ErrorKey.Field(readErr.Error()),
 			)
-			writeError(w, ErrBadRequest.WithMessage("failed to read request body").WithCause(readErr))
+			writeError(ctx, w, ErrBadRequest.WithMessage("failed to read request body").WithCause(readErr), h.spec.Name)
 			return http.StatusBadRequest, readErr
 		}
-		r.Body.Close()
+		if closeErr := r.Body.Close(); closeErr != nil {
+			capitan.Warn(ctx, RequestBodyCloseError,
+				HandlerNameKey.Field(h.spec.Name),
+				ErrorKey.Field(closeErr.Error()),
+			)
+		}
 
 		if len(body) > 0 {
 			if unmarshalErr := json.Unmarshal(body, &input); unmarshalErr != nil {
@@ -103,7 +108,7 @@ func (h *Handler[In, Out]) Process(ctx context.Context, r *http.Request, w http.
 					HandlerNameKey.Field(h.spec.Name),
 					ErrorKey.Field(unmarshalErr.Error()),
 				)
-				writeError(w, ErrUnprocessableEntity.WithMessage("invalid request body").WithCause(unmarshalErr))
+				writeError(ctx, w, ErrUnprocessableEntity.WithMessage("invalid request body").WithCause(unmarshalErr), h.spec.Name)
 				return http.StatusUnprocessableEntity, unmarshalErr
 			}
 
@@ -113,7 +118,7 @@ func (h *Handler[In, Out]) Process(ctx context.Context, r *http.Request, w http.
 					HandlerNameKey.Field(h.spec.Name),
 					ErrorKey.Field(inputErr.Error()),
 				)
-				writeValidationErrorResponse(w, inputErr)
+				writeValidationErrorResponse(ctx, w, inputErr, h.spec.Name)
 				return http.StatusUnprocessableEntity, inputErr
 			}
 		}
@@ -149,7 +154,7 @@ func (h *Handler[In, Out]) Process(ctx context.Context, r *http.Request, w http.
 					ErrorKey.Field(err.Error()),
 					StatusCodeKey.Field(e.Status()),
 				)
-				writeError(w, ErrInternalServer)
+				writeError(ctx, w, ErrInternalServer, h.spec.Name)
 				return http.StatusInternalServerError, fmt.Errorf("undeclared error %s (add to WithErrors)", e.Code())
 			}
 
@@ -159,7 +164,7 @@ func (h *Handler[In, Out]) Process(ctx context.Context, r *http.Request, w http.
 				ErrorKey.Field(err.Error()),
 				StatusCodeKey.Field(e.Status()),
 			)
-			writeError(w, e)
+			writeError(ctx, w, e, h.spec.Name)
 			return e.Status(), nil
 		}
 
@@ -168,7 +173,7 @@ func (h *Handler[In, Out]) Process(ctx context.Context, r *http.Request, w http.
 			HandlerNameKey.Field(h.spec.Name),
 			ErrorKey.Field(err.Error()),
 		)
-		writeError(w, ErrInternalServer)
+		writeError(ctx, w, ErrInternalServer, h.spec.Name)
 		return http.StatusInternalServerError, err
 	}
 
@@ -179,7 +184,7 @@ func (h *Handler[In, Out]) Process(ctx context.Context, r *http.Request, w http.
 				HandlerNameKey.Field(h.spec.Name),
 				ErrorKey.Field(validErr.Error()),
 			)
-			writeError(w, ErrInternalServer.WithCause(fmt.Errorf("output validation failed: %w", validErr)))
+			writeError(ctx, w, ErrInternalServer.WithCause(fmt.Errorf("output validation failed: %w", validErr)), h.spec.Name)
 			return http.StatusInternalServerError, fmt.Errorf("output validation failed: %w", validErr)
 		}
 	}
@@ -191,7 +196,7 @@ func (h *Handler[In, Out]) Process(ctx context.Context, r *http.Request, w http.
 			HandlerNameKey.Field(h.spec.Name),
 			ErrorKey.Field(err.Error()),
 		)
-		writeError(w, ErrInternalServer.WithCause(err))
+		writeError(ctx, w, ErrInternalServer.WithCause(err), h.spec.Name)
 		return http.StatusInternalServerError, err
 	}
 
@@ -203,7 +208,12 @@ func (h *Handler[In, Out]) Process(ctx context.Context, r *http.Request, w http.
 
 	// Write status and body.
 	w.WriteHeader(h.spec.SuccessStatus)
-	w.Write(body)
+	if _, err := w.Write(body); err != nil {
+		capitan.Warn(ctx, ResponseWriteError,
+			HandlerNameKey.Field(h.spec.Name),
+			ErrorKey.Field(err.Error()),
+		)
+	}
 
 	// Emit handler success event
 	capitan.Info(ctx, HandlerSuccess,
@@ -415,20 +425,24 @@ func (h *Handler[In, Out]) isErrorDeclared(err ErrorDefinition) bool {
 }
 
 // writeError writes a structured JSON error response.
-func writeError(w http.ResponseWriter, err ErrorDefinition) {
+func writeError(ctx context.Context, w http.ResponseWriter, err ErrorDefinition, handlerName string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(err.Status())
 
-	//nolint:errchkjson // Standard practice after WriteHeader
-	json.NewEncoder(w).Encode(errorResponse{
+	if encodeErr := json.NewEncoder(w).Encode(errorResponse{
 		Code:    err.Code(),
 		Message: err.Message(),
 		Details: err.DetailsAny(),
-	})
+	}); encodeErr != nil {
+		capitan.Warn(ctx, ResponseWriteError,
+			HandlerNameKey.Field(handlerName),
+			ErrorKey.Field(encodeErr.Error()),
+		)
+	}
 }
 
 // writeValidationErrorResponse writes detailed validation errors using the standard error format.
-func writeValidationErrorResponse(w http.ResponseWriter, err error) {
+func writeValidationErrorResponse(ctx context.Context, w http.ResponseWriter, err error, handlerName string) {
 	// Extract validation errors.
 	var validationErrors []ValidationFieldError
 	var ve validator.ValidationErrors
@@ -442,7 +456,7 @@ func writeValidationErrorResponse(w http.ResponseWriter, err error) {
 		}
 	}
 
-	writeError(w, ErrValidationFailed.WithDetails(ValidationDetails{
+	writeError(ctx, w, ErrValidationFailed.WithDetails(ValidationDetails{
 		Fields: validationErrors,
-	}))
+	}), handlerName)
 }

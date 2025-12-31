@@ -148,7 +148,7 @@ func (h *StreamHandler[In, Out]) Process(ctx context.Context, r *http.Request, w
 			HandlerNameKey.Field(h.spec.Name),
 			ErrorKey.Field("streaming not supported"),
 		)
-		writeError(w, ErrInternalServer.WithMessage("streaming not supported"))
+		writeError(ctx, w, ErrInternalServer.WithMessage("streaming not supported"), h.spec.Name)
 		return http.StatusInternalServerError, errors.New("streaming not supported")
 	}
 
@@ -159,7 +159,7 @@ func (h *StreamHandler[In, Out]) Process(ctx context.Context, r *http.Request, w
 			HandlerNameKey.Field(h.spec.Name),
 			ErrorKey.Field(err.Error()),
 		)
-		writeError(w, ErrUnprocessableEntity.WithMessage("invalid parameters").WithCause(err))
+		writeError(ctx, w, ErrUnprocessableEntity.WithMessage("invalid parameters").WithCause(err), h.spec.Name)
 		return http.StatusUnprocessableEntity, err
 	}
 
@@ -172,10 +172,15 @@ func (h *StreamHandler[In, Out]) Process(ctx context.Context, r *http.Request, w
 				HandlerNameKey.Field(h.spec.Name),
 				ErrorKey.Field(readErr.Error()),
 			)
-			writeError(w, ErrBadRequest.WithMessage("failed to read request body").WithCause(readErr))
+			writeError(ctx, w, ErrBadRequest.WithMessage("failed to read request body").WithCause(readErr), h.spec.Name)
 			return http.StatusBadRequest, readErr
 		}
-		r.Body.Close()
+		if err := r.Body.Close(); err != nil {
+			capitan.Warn(ctx, RequestBodyCloseError,
+				HandlerNameKey.Field(h.spec.Name),
+				ErrorKey.Field(err.Error()),
+			)
+		}
 
 		if len(body) > 0 {
 			if unmarshalErr := json.Unmarshal(body, &input); unmarshalErr != nil {
@@ -183,7 +188,7 @@ func (h *StreamHandler[In, Out]) Process(ctx context.Context, r *http.Request, w
 					HandlerNameKey.Field(h.spec.Name),
 					ErrorKey.Field(unmarshalErr.Error()),
 				)
-				writeError(w, ErrUnprocessableEntity.WithMessage("invalid request body").WithCause(unmarshalErr))
+				writeError(ctx, w, ErrUnprocessableEntity.WithMessage("invalid request body").WithCause(unmarshalErr), h.spec.Name)
 				return http.StatusUnprocessableEntity, unmarshalErr
 			}
 
@@ -193,7 +198,7 @@ func (h *StreamHandler[In, Out]) Process(ctx context.Context, r *http.Request, w
 					HandlerNameKey.Field(h.spec.Name),
 					ErrorKey.Field(inputErr.Error()),
 				)
-				writeValidationErrorResponse(w, inputErr)
+				writeValidationErrorResponse(ctx, w, inputErr, h.spec.Name)
 				return http.StatusUnprocessableEntity, inputErr
 			}
 		}

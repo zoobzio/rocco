@@ -201,7 +201,7 @@ func (e *Engine) buildAuthMiddleware() func(http.Handler) http.Handler {
 					PathKey.Field(r.URL.Path),
 					ErrorKey.Field(err.Error()),
 				)
-				writeError(w, ErrUnauthorized)
+				writeError(ctx, w, ErrUnauthorized, "auth")
 				return
 			}
 
@@ -240,13 +240,13 @@ func (*Engine) buildAuthorizationMiddleware(handler Endpoint) func(http.Handler)
 			// Extract identity from context (should exist from auth middleware)
 			val := ctx.Value(identityContextKey)
 			if val == nil {
-				writeError(w, ErrForbidden.WithMessage("identity not found"))
+				writeError(ctx, w, ErrForbidden.WithMessage("identity not found"), handlerSpec.Name)
 				return
 			}
 
 			identity, ok := val.(Identity)
 			if !ok {
-				writeError(w, ErrForbidden.WithMessage("invalid identity"))
+				writeError(ctx, w, ErrForbidden.WithMessage("invalid identity"), handlerSpec.Name)
 				return
 			}
 
@@ -267,7 +267,7 @@ func (*Engine) buildAuthorizationMiddleware(handler Endpoint) func(http.Handler)
 						IdentityIDKey.Field(identity.ID()),
 						RequiredScopesKey.Field(strings.Join(scopeGroup, ",")),
 					)
-					writeError(w, ErrForbidden.WithMessage("insufficient scope"))
+					writeError(ctx, w, ErrForbidden.WithMessage("insufficient scope"), handlerSpec.Name)
 					return
 				}
 			}
@@ -289,7 +289,7 @@ func (*Engine) buildAuthorizationMiddleware(handler Endpoint) func(http.Handler)
 						IdentityIDKey.Field(identity.ID()),
 						RequiredRolesKey.Field(strings.Join(roleGroup, ",")),
 					)
-					writeError(w, ErrForbidden.WithMessage("insufficient role"))
+					writeError(ctx, w, ErrForbidden.WithMessage("insufficient role"), handlerSpec.Name)
 					return
 				}
 			}
@@ -317,13 +317,13 @@ func (*Engine) buildUsageLimitMiddleware(handler Endpoint) func(http.Handler) ht
 			// Extract identity from context (should exist from auth middleware)
 			val := ctx.Value(identityContextKey)
 			if val == nil {
-				writeError(w, ErrForbidden.WithMessage("identity not found"))
+				writeError(ctx, w, ErrForbidden.WithMessage("identity not found"), handlerSpec.Name)
 				return
 			}
 
 			identity, ok := val.(Identity)
 			if !ok {
-				writeError(w, ErrForbidden.WithMessage("invalid identity"))
+				writeError(ctx, w, ErrForbidden.WithMessage("invalid identity"), handlerSpec.Name)
 				return
 			}
 
@@ -347,7 +347,7 @@ func (*Engine) buildUsageLimitMiddleware(handler Endpoint) func(http.Handler) ht
 						CurrentValueKey.Field(currentValue),
 						ThresholdKey.Field(threshold),
 					)
-					writeError(w, ErrTooManyRequests)
+					writeError(ctx, w, ErrTooManyRequests, handlerSpec.Name)
 					return
 				}
 			}
@@ -368,7 +368,7 @@ func (e *Engine) ensureDefaultHandlers() {
 // registerDefaultHandlers sets up OpenAPI spec and docs handlers at /openapi and /docs.
 func (e *Engine) registerDefaultHandlers() {
 	// OpenAPI spec handler at /openapi
-	e.mux.HandleFunc("GET /openapi", func(w http.ResponseWriter, _ *http.Request) {
+	e.mux.HandleFunc("GET /openapi", func(w http.ResponseWriter, r *http.Request) {
 		// Generate and cache spec on first request (cached forever after)
 		e.openAPIOnce.Do(func() {
 			spec := e.GenerateOpenAPI(nil)
@@ -387,11 +387,16 @@ func (e *Engine) registerDefaultHandlers() {
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write(e.cachedOpenAPISpec)
+		if _, err := w.Write(e.cachedOpenAPISpec); err != nil {
+			capitan.Warn(r.Context(), ResponseWriteError,
+				HandlerNameKey.Field("openapi"),
+				ErrorKey.Field(err.Error()),
+			)
+		}
 	})
 
 	// Docs handler at /docs
-	e.mux.HandleFunc("GET /docs", func(w http.ResponseWriter, _ *http.Request) {
+	e.mux.HandleFunc("GET /docs", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
 
@@ -408,7 +413,12 @@ func (e *Engine) registerDefaultHandlers() {
 </body>
 </html>`
 
-		w.Write([]byte(html))
+		if _, err := w.Write([]byte(html)); err != nil {
+			capitan.Warn(r.Context(), ResponseWriteError,
+				HandlerNameKey.Field("docs"),
+				ErrorKey.Field(err.Error()),
+			)
+		}
 	})
 }
 
