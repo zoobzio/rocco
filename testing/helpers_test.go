@@ -587,3 +587,343 @@ func TestDecodeJSON(t *testing.T) {
 		t.Errorf("expected count 42, got %d", result.Count)
 	}
 }
+
+// mockTB implements testing.TB for testing assertion failures.
+type mockTB struct {
+	testing.TB
+	errors   []string
+	fatals   []string
+	helpers  int
+	failed   bool
+}
+
+func newMockTB() *mockTB {
+	return &mockTB{
+		errors: make([]string, 0),
+		fatals: make([]string, 0),
+	}
+}
+
+func (m *mockTB) Helper() {
+	m.helpers++
+}
+
+func (m *mockTB) Errorf(format string, args ...any) {
+	m.errors = append(m.errors, format)
+	m.failed = true
+}
+
+func (m *mockTB) Fatalf(format string, args ...any) {
+	m.fatals = append(m.fatals, format)
+	m.failed = true
+}
+
+// Tests for assertion failure branches
+
+func TestAssertStatus_Failure(t *testing.T) {
+	capture := NewResponseCapture()
+	capture.WriteHeader(http.StatusNotFound)
+
+	mock := newMockTB()
+	AssertStatus(mock, capture, http.StatusOK)
+
+	if !mock.failed {
+		t.Error("expected assertion to fail")
+	}
+	if len(mock.errors) != 1 {
+		t.Errorf("expected 1 error, got %d", len(mock.errors))
+	}
+}
+
+func TestAssertJSON_Failure_MismatchedContent(t *testing.T) {
+	capture := NewResponseCapture()
+	capture.WriteHeader(http.StatusOK)
+	capture.Write([]byte(`{"name":"actual"}`))
+
+	mock := newMockTB()
+	AssertJSON(mock, capture, map[string]any{"name": "expected"})
+
+	if !mock.failed {
+		t.Error("expected assertion to fail")
+	}
+}
+
+func TestAssertJSON_Failure_InvalidActualJSON(t *testing.T) {
+	capture := NewResponseCapture()
+	capture.WriteHeader(http.StatusOK)
+	capture.Write([]byte(`not valid json`))
+
+	mock := newMockTB()
+	AssertJSON(mock, capture, map[string]any{"name": "test"})
+
+	if !mock.failed {
+		t.Error("expected assertion to fail")
+	}
+	if len(mock.fatals) != 1 {
+		t.Errorf("expected 1 fatal, got %d", len(mock.fatals))
+	}
+}
+
+func TestAssertJSON_Failure_UnmarshalableExpected(t *testing.T) {
+	capture := NewResponseCapture()
+	capture.WriteHeader(http.StatusOK)
+	capture.Write([]byte(`{"name":"test"}`))
+
+	mock := newMockTB()
+	// Channels cannot be marshaled to JSON
+	AssertJSON(mock, capture, make(chan int))
+
+	if !mock.failed {
+		t.Error("expected assertion to fail")
+	}
+	// Mock doesn't stop on Fatalf like real tests, so multiple fatals may occur
+	if len(mock.fatals) < 1 {
+		t.Errorf("expected at least 1 fatal, got %d", len(mock.fatals))
+	}
+}
+
+func TestAssertErrorCode_Failure_InvalidJSON(t *testing.T) {
+	capture := NewResponseCapture()
+	capture.WriteHeader(http.StatusBadRequest)
+	capture.Write([]byte(`not json`))
+
+	mock := newMockTB()
+	AssertErrorCode(mock, capture, "BAD_REQUEST")
+
+	if !mock.failed {
+		t.Error("expected assertion to fail")
+	}
+}
+
+func TestAssertErrorCode_Failure_WrongCode(t *testing.T) {
+	capture := NewResponseCapture()
+	capture.WriteHeader(http.StatusBadRequest)
+	capture.Write([]byte(`{"code":"ACTUAL_CODE"}`))
+
+	mock := newMockTB()
+	AssertErrorCode(mock, capture, "EXPECTED_CODE")
+
+	if !mock.failed {
+		t.Error("expected assertion to fail")
+	}
+	if len(mock.errors) != 1 {
+		t.Errorf("expected 1 error, got %d", len(mock.errors))
+	}
+}
+
+func TestAssertContentType_Failure(t *testing.T) {
+	capture := NewResponseCapture()
+	capture.Header().Set("Content-Type", "text/plain")
+	capture.WriteHeader(http.StatusOK)
+
+	mock := newMockTB()
+	AssertContentType(mock, capture, "application/json")
+
+	if !mock.failed {
+		t.Error("expected assertion to fail")
+	}
+}
+
+func TestAssertSSE_Failure_WrongContentType(t *testing.T) {
+	capture := NewStreamCapture()
+	capture.Header().Set("Content-Type", "application/json")
+	capture.WriteHeader(http.StatusOK)
+
+	mock := newMockTB()
+	AssertSSE(mock, capture)
+
+	if !mock.failed {
+		t.Error("expected assertion to fail")
+	}
+}
+
+func TestAssertSSE_Failure_WrongStatus(t *testing.T) {
+	capture := NewStreamCapture()
+	capture.Header().Set("Content-Type", "text/event-stream")
+	capture.WriteHeader(http.StatusInternalServerError)
+
+	mock := newMockTB()
+	AssertSSE(mock, capture)
+
+	if !mock.failed {
+		t.Error("expected assertion to fail")
+	}
+}
+
+func TestAssertEventCount_Failure(t *testing.T) {
+	capture := NewStreamCapture()
+	capture.WriteHeader(http.StatusOK)
+	capture.Write([]byte("data: one\n\n"))
+
+	mock := newMockTB()
+	AssertEventCount(mock, capture, 5)
+
+	if !mock.failed {
+		t.Error("expected assertion to fail")
+	}
+}
+
+// Tests for WithJSON panic branch
+
+func TestRequestBuilder_WithJSON_Panic(t *testing.T) {
+	defer func() {
+		if r := recover(); r == nil {
+			t.Error("expected panic for unmarshalable type")
+		}
+	}()
+
+	// Channels cannot be marshaled to JSON
+	NewRequestBuilder("POST", "/test").WithJSON(make(chan int))
+}
+
+// Tests for body != nil branches in serve functions
+
+type testInput struct {
+	Name string `json:"name"`
+}
+
+func TestServeRequest_WithBody(t *testing.T) {
+	engine := TestEngine()
+
+	handler := rocco.NewHandler[testInput, testOutput](
+		"test",
+		"POST",
+		"/test",
+		func(req *rocco.Request[testInput]) (testOutput, error) {
+			return testOutput{Message: req.Body.Name}, nil
+		},
+	)
+	engine.WithHandlers(handler)
+
+	capture := ServeRequest(engine, "POST", "/test", testInput{Name: "fromBody"})
+
+	if capture.StatusCode() != http.StatusOK {
+		t.Errorf("expected status 200, got %d", capture.StatusCode())
+	}
+
+	var resp testOutput
+	capture.DecodeJSON(&resp)
+	if resp.Message != "fromBody" {
+		t.Errorf("expected message 'fromBody', got %q", resp.Message)
+	}
+}
+
+func TestServeRequestWithHeaders_WithBody(t *testing.T) {
+	engine := TestEngine()
+
+	handler := rocco.NewHandler[testInput, testOutput](
+		"test",
+		"POST",
+		"/test",
+		func(req *rocco.Request[testInput]) (testOutput, error) {
+			return testOutput{Message: req.Body.Name}, nil
+		},
+	)
+	engine.WithHandlers(handler)
+
+	headers := map[string]string{"X-Custom": "value"}
+	capture := ServeRequestWithHeaders(engine, "POST", "/test", testInput{Name: "withHeaders"}, headers)
+
+	var resp testOutput
+	capture.DecodeJSON(&resp)
+	if resp.Message != "withHeaders" {
+		t.Errorf("expected message 'withHeaders', got %q", resp.Message)
+	}
+}
+
+func TestServeStream_WithBody(t *testing.T) {
+	engine := TestEngine()
+
+	type streamInput struct {
+		Topic string `json:"topic"`
+	}
+
+	handler := rocco.NewStreamHandler[streamInput, streamOutput](
+		"test-stream",
+		"POST",
+		"/events",
+		func(req *rocco.Request[streamInput], stream rocco.Stream[streamOutput]) error {
+			return stream.Send(streamOutput{Message: req.Body.Topic, Count: 1})
+		},
+	)
+	engine.WithHandlers(handler)
+
+	capture := ServeStream(engine, "POST", "/events", streamInput{Topic: "news"})
+
+	events := capture.ParseEvents()
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+}
+
+func TestServeStreamWithContext_WithBody(t *testing.T) {
+	engine := TestEngine()
+
+	type streamInput struct {
+		Topic string `json:"topic"`
+	}
+
+	handler := rocco.NewStreamHandler[streamInput, streamOutput](
+		"test-stream",
+		"POST",
+		"/events",
+		func(req *rocco.Request[streamInput], stream rocco.Stream[streamOutput]) error {
+			return stream.Send(streamOutput{Message: req.Body.Topic, Count: 1})
+		},
+	)
+	engine.WithHandlers(handler)
+
+	ctx := context.Background()
+	capture := ServeStreamWithContext(ctx, engine, "POST", "/events", streamInput{Topic: "updates"})
+
+	if capture.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d", capture.Code)
+	}
+}
+
+func TestServeStreamWithHeaders_WithBody(t *testing.T) {
+	engine := TestEngine()
+
+	type streamInput struct {
+		Topic string `json:"topic"`
+	}
+
+	handler := rocco.NewStreamHandler[streamInput, streamOutput](
+		"test-stream",
+		"POST",
+		"/events",
+		func(req *rocco.Request[streamInput], stream rocco.Stream[streamOutput]) error {
+			return stream.Send(streamOutput{Message: req.Body.Topic, Count: 1})
+		},
+	)
+	engine.WithHandlers(handler)
+
+	headers := map[string]string{"Authorization": "Bearer token"}
+	capture := ServeStreamWithHeaders(engine, "POST", "/events", streamInput{Topic: "alerts"}, headers)
+
+	if capture.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d", capture.Code)
+	}
+}
+
+// Test for trimPrefix trailing space branch
+
+func TestParseSSEEvents_TrailingSpaces(t *testing.T) {
+	// Test data with trailing spaces after values
+	body := "event: update   \ndata: hello   \nid: 123   \n\n"
+
+	events := ParseSSEEvents(body)
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+
+	if events[0].Event != "update" {
+		t.Errorf("expected event 'update', got %q", events[0].Event)
+	}
+	if events[0].Data != "hello" {
+		t.Errorf("expected data 'hello', got %q", events[0].Data)
+	}
+	if events[0].ID != "123" {
+		t.Errorf("expected id '123', got %q", events[0].ID)
+	}
+}

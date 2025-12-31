@@ -832,6 +832,88 @@ func TestEngine_UsageLimitMiddleware_MissingStatKey(t *testing.T) {
 	}
 }
 
+// failingResponseWriter is a ResponseWriter that fails on Write.
+type failingResponseWriter struct {
+	header http.Header
+	code   int
+}
+
+func (f *failingResponseWriter) Header() http.Header {
+	if f.header == nil {
+		f.header = make(http.Header)
+	}
+	return f.header
+}
+
+func (f *failingResponseWriter) Write(_ []byte) (int, error) {
+	return 0, errors.New("write failed")
+}
+
+func (f *failingResponseWriter) WriteHeader(code int) {
+	f.code = code
+}
+
+func TestWriteError_EncodeFails(t *testing.T) {
+	ctx := context.Background()
+	w := &failingResponseWriter{}
+
+	// This should not panic - just emit a warning event
+	writeError(ctx, w, ErrBadRequest, "test-handler")
+
+	if w.code != http.StatusBadRequest {
+		t.Errorf("expected status %d, got %d", http.StatusBadRequest, w.code)
+	}
+}
+
+func TestEngine_DefaultHandlers_OpenAPI_WriteFails(t *testing.T) {
+	engine := newTestEngine()
+
+	// Register a handler to ensure OpenAPI has content
+	handler := NewHandler[NoBody, testOutput](
+		"test",
+		"GET",
+		"/test",
+		func(_ *Request[NoBody]) (testOutput, error) {
+			return testOutput{Message: "OK"}, nil
+		},
+	)
+	engine.WithHandlers(handler)
+
+	// First request to cache the spec
+	req1 := httptest.NewRequest("GET", "/openapi", nil)
+	w1 := httptest.NewRecorder()
+	engine.mux.ServeHTTP(w1, req1)
+
+	if w1.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", w1.Code)
+	}
+
+	// Now test with failing writer - should not panic
+	req2 := httptest.NewRequest("GET", "/openapi", nil)
+	fw := &failingResponseWriter{}
+	engine.mux.ServeHTTP(fw, req2)
+
+	// Status should still be set
+	if fw.code != http.StatusOK {
+		t.Errorf("expected status 200, got %d", fw.code)
+	}
+}
+
+func TestEngine_DefaultHandlers_Docs_WriteFails(t *testing.T) {
+	engine := newTestEngine()
+	engine.ensureDefaultHandlers()
+
+	req := httptest.NewRequest("GET", "/docs", nil)
+	fw := &failingResponseWriter{}
+
+	// Should not panic
+	engine.mux.ServeHTTP(fw, req)
+
+	if fw.code != http.StatusOK {
+		t.Errorf("expected status 200, got %d", fw.code)
+	}
+}
+
 // Helper function
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsHelper(s, substr))

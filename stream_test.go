@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -637,6 +638,31 @@ func TestStream_SendEvent_WriteError(t *testing.T) {
 	}
 }
 
+func TestStream_Send_DataWriteError(t *testing.T) {
+	// Tests data write error path (no event name, so goes directly to data write)
+	ew := &errorWriter{
+		ResponseRecorder: httptest.NewRecorder(),
+		failOnWrite:      true,
+	}
+
+	stream := &sseStream[streamEvent]{
+		w:       ew,
+		flusher: ew,
+		done:    make(chan struct{}),
+	}
+
+	err := stream.Send(streamEvent{Message: "test", Count: 1})
+	if err == nil {
+		t.Error("expected write error")
+	}
+	if !strings.Contains(err.Error(), "failed to write event data") {
+		t.Errorf("expected 'failed to write event data' error, got %q", err.Error())
+	}
+	if !stream.closed {
+		t.Error("expected stream to be closed after write error")
+	}
+}
+
 func TestStream_SendComment_WriteError(t *testing.T) {
 	ew := &errorWriter{
 		ResponseRecorder: httptest.NewRecorder(),
@@ -778,6 +804,39 @@ func TestStreamHandler_Process_BodyReadError(t *testing.T) {
 	if status != http.StatusBadRequest {
 		t.Errorf("expected status 400, got %d", status)
 	}
+}
+
+func TestStreamHandler_Process_BodyCloseFails(t *testing.T) {
+	handler := NewStreamHandler[streamInput, streamEvent](
+		"test-stream",
+		"POST",
+		"/events",
+		func(req *Request[streamInput], stream Stream[streamEvent]) error {
+			return stream.Send(streamEvent{Message: req.Body.Topic, Count: 1})
+		},
+	)
+
+	body := bytes.NewBufferString(`{"topic":"test"}`)
+	req := httptest.NewRequest("POST", "/events", &streamFailingCloser{Reader: body})
+	w := newFlushRecorder()
+
+	// Should not fail - just emit warning event
+	status, err := handler.Process(context.Background(), req, w)
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if status != http.StatusOK {
+		t.Errorf("expected status 200, got %d", status)
+	}
+}
+
+// streamFailingCloser wraps a reader and fails on Close.
+type streamFailingCloser struct {
+	io.Reader
+}
+
+func (f *streamFailingCloser) Close() error {
+	return errors.New("close failed")
 }
 
 // errorReader is defined in handler_test.go

@@ -823,3 +823,82 @@ func TestHandler_WithRoles_EmptyDoesNothing(t *testing.T) {
 		t.Errorf("expected 0 role groups, got %d", len(spec.RoleGroups))
 	}
 }
+
+// failingWriter is a ResponseWriter that fails on Write.
+type failingWriter struct {
+	header http.Header
+	code   int
+}
+
+func (f *failingWriter) Header() http.Header {
+	if f.header == nil {
+		f.header = make(http.Header)
+	}
+	return f.header
+}
+
+func (f *failingWriter) Write(_ []byte) (int, error) {
+	return 0, errors.New("write failed")
+}
+
+func (f *failingWriter) WriteHeader(code int) {
+	f.code = code
+}
+
+func TestHandler_Process_ResponseWriteFails(t *testing.T) {
+	handler := NewHandler[NoBody, testOutput](
+		"test",
+		"GET",
+		"/test",
+		func(_ *Request[NoBody]) (testOutput, error) {
+			return testOutput{Message: "hello"}, nil
+		},
+	)
+
+	req := httptest.NewRequest("GET", "/test", nil)
+	fw := &failingWriter{}
+
+	// Should not panic - just emit warning event
+	status, err := handler.Process(context.Background(), req, fw)
+
+	if err != nil {
+		t.Errorf("expected no error, got %v", err)
+	}
+	if status != http.StatusOK {
+		t.Errorf("expected status 200, got %d", status)
+	}
+}
+
+func TestHandler_Process_BodyCloseFails(t *testing.T) {
+	handler := NewHandler[testInput, testOutput](
+		"test",
+		"POST",
+		"/test",
+		func(r *Request[testInput]) (testOutput, error) {
+			return testOutput{Message: r.Body.Name}, nil
+		},
+	)
+
+	body := bytes.NewBufferString(`{"name":"test","count":1}`)
+	req := httptest.NewRequest("POST", "/test", &failingCloser{Reader: body})
+	w := httptest.NewRecorder()
+
+	// Should not panic - just emit warning event
+	status, err := handler.Process(context.Background(), req, w)
+
+	if err != nil {
+		t.Errorf("expected no error, got %v", err)
+	}
+	if status != http.StatusOK {
+		t.Errorf("expected status 200, got %d", status)
+	}
+}
+
+// failingCloser wraps a reader and fails on Close.
+type failingCloser struct {
+	io.Reader
+}
+
+func (f *failingCloser) Close() error {
+	return errors.New("close failed")
+}
