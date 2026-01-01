@@ -20,8 +20,8 @@ github.com/zoobzio/capitan v0.1.0 h1:OmTmZNtUhoIDIA7sQ50x9CP21JJUYkqZFyavY6torMA
 github.com/zoobzio/capitan v0.1.0/go.mod h1:/OwNDIB1CHxwSzsF4e48B2+2e/IMIvTb0ZMgVeNyYig=
 github.com/zoobzio/openapi v0.1.1 h1:+ik1bCB1qK4wtcrTuA/9YZc6LJkaLOz0eoDUaf9D83Q=
 github.com/zoobzio/openapi v0.1.1/go.mod h1:B9H/O52knkfi9j9KIGRufcSFYUyAg6gDhUGocMCFNfo=
-github.com/zoobzio/sentinel v0.0.6 h1:K6xqs/qelsjC5wGthPzw3cRWjGi0p1mwhh5oSJQT6Ko=
-github.com/zoobzio/sentinel v0.0.6/go.mod h1:1c0vVxUQLFuBrAqMJyvWKWsRW5fp2UT5+jzC9FucUWY=
+github.com/zoobzio/sentinel v0.1.4 h1:FvxnFUsf51mN6S9PElVSO8SAm4WR8IwMEwsaUz+JyBk=
+github.com/zoobzio/sentinel v0.1.4/go.mod h1:gtsD0AYlTEI8ajpEQ3azb7BDZicdsESOB1dJpQqgDKc=
 golang.org/x/crypto v0.42.0 h1:chiH31gIWm57EkTXpwnqf8qeuMUi0yekh6mT2AvFlqI=
 golang.org/x/crypto v0.42.0/go.mod h1:4+rDnOTJhQCx2q7/j6rAN5XDw8kPjeaXEUR2eL94ix8=
 golang.org/x/sys v0.36.0 h1:KVRy2GtZBrk1cBYA7MKu5bEZFxQk4NIDV6RLVcC8o0k=

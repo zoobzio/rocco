@@ -35,8 +35,8 @@ type Handler[In, Out any] struct {
 	validateOutput  bool              // Whether to validate output structs (disabled by default).
 
 	// Type metadata from sentinel.
-	InputMeta  sentinel.ModelMetadata
-	OutputMeta sentinel.ModelMetadata
+	InputMeta  sentinel.Metadata
+	OutputMeta sentinel.Metadata
 
 	// Error definitions with schemas for OpenAPI generation.
 	errorDefs []ErrorDefinition

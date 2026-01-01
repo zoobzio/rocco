@@ -12,7 +12,7 @@ type ErrorDefinition interface {
 	Status() int
 	Message() string
 	DetailsAny() any                     // For serialization (type-erased)
-	DetailsMeta() sentinel.ModelMetadata // For OpenAPI schema generation
+	DetailsMeta() sentinel.Metadata // For OpenAPI schema generation
 }
 
 // Error represents a structured API error with code, status, message, and typed details.
@@ -24,7 +24,7 @@ type Error[D any] struct {
 	message     string
 	details     D
 	cause       error
-	detailsMeta sentinel.ModelMetadata
+	detailsMeta sentinel.Metadata
 }
 
 // Error implements the error interface.
@@ -60,7 +60,7 @@ func (e *Error[D]) DetailsAny() any {
 
 // DetailsMeta returns the sentinel metadata for the details type.
 // Used by OpenAPI generation to create schemas.
-func (e *Error[D]) DetailsMeta() sentinel.ModelMetadata {
+func (e *Error[D]) DetailsMeta() sentinel.Metadata {
 	return e.detailsMeta
 }
 

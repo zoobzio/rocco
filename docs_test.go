@@ -8,7 +8,7 @@ import (
 )
 
 func TestMetadataToSchema(t *testing.T) {
-	meta := sentinel.ModelMetadata{
+	meta := sentinel.Metadata{
 		TypeName: "TestModel",
 		Fields: []sentinel.FieldMetadata{
 			{
@@ -149,7 +149,7 @@ func TestGoTypeToSchema_ComplexType(t *testing.T) {
 }
 
 func TestSchemaName(t *testing.T) {
-	meta := sentinel.ModelMetadata{
+	meta := sentinel.Metadata{
 		TypeName: "UserModel",
 	}
 
@@ -796,7 +796,7 @@ func TestParseJSONTag_EmptyName(t *testing.T) {
 }
 
 func TestMetadataToSchema_SkipJSONDashFields(t *testing.T) {
-	meta := sentinel.ModelMetadata{
+	meta := sentinel.Metadata{
 		TypeName: "TestModel",
 		Fields: []sentinel.FieldMetadata{
 			{

@@ -121,8 +121,8 @@ type StreamHandler[In, Out any] struct {
 	spec HandlerSpec
 
 	// Type metadata from sentinel.
-	InputMeta  sentinel.ModelMetadata
-	OutputMeta sentinel.ModelMetadata
+	InputMeta  sentinel.Metadata
+	OutputMeta sentinel.Metadata
 
 	// Error definitions with schemas for OpenAPI generation.
 	errorDefs []ErrorDefinition

@@ -6,7 +6,7 @@ require (
 	github.com/go-playground/validator/v10 v10.28.0
 	github.com/zoobzio/capitan v0.1.0
 	github.com/zoobzio/openapi v0.1.1
-	github.com/zoobzio/sentinel v0.0.6
+	github.com/zoobzio/sentinel v0.1.4
 )
 
 require (

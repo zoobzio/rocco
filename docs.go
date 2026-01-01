@@ -340,8 +340,8 @@ func applyOpenAPITags(schema *openapi.Schema, field sentinel.FieldMetadata) {
 	}
 }
 
-// metadataToSchema converts sentinel ModelMetadata to OpenAPI Schema
-func metadataToSchema(meta sentinel.ModelMetadata) *openapi.Schema {
+// metadataToSchema converts sentinel Metadata to OpenAPI Schema
+func metadataToSchema(meta sentinel.Metadata) *openapi.Schema {
 	schema := &openapi.Schema{
 		Type:       openapi.NewSchemaType("object"),
 		Properties: make(map[string]*openapi.Schema),
@@ -451,8 +451,8 @@ func goTypeToSchema(goType string) *openapi.Schema {
 	}
 }
 
-// schemaName extracts a clean schema name from ModelMetadata
-func schemaName(meta sentinel.ModelMetadata) string {
+// schemaName extracts a clean schema name from Metadata
+func schemaName(meta sentinel.Metadata) string {
 	// Use TypeName which is already the clean struct name
 	return meta.TypeName
 }
@@ -620,8 +620,8 @@ func (e *Engine) GenerateOpenAPI(identity Identity) *openapi.OpenAPI {
 	processedTypes := make(map[string]bool) // Prevent infinite recursion
 
 	// Helper to recursively collect schemas for a type and its relationships
-	var collectSchemas func(meta sentinel.ModelMetadata)
-	collectSchemas = func(meta sentinel.ModelMetadata) {
+	var collectSchemas func(meta sentinel.Metadata)
+	collectSchemas = func(meta sentinel.Metadata) {
 		typeName := meta.TypeName
 		if processedTypes[typeName] {
 			return
