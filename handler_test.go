@@ -342,6 +342,30 @@ func TestHandler_ExtractParams_PathParams(t *testing.T) {
 	}
 }
 
+func TestHandler_ExtractParams_WildcardPathParam(t *testing.T) {
+	handler := NewHandler[NoBody, testOutput](
+		"test",
+		"GET",
+		"/content/{path...}",
+		func(_ *Request[NoBody]) (testOutput, error) {
+			return testOutput{}, nil
+		},
+	).WithPathParams("path...")
+
+	req := httptest.NewRequest("GET", "/content/src/lib/main.go", nil)
+	req.SetPathValue("path", "src/lib/main.go")
+
+	spec := handler.Spec()
+	params, err := extractParams(context.Background(), req, spec.PathParams, spec.QueryParams)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if params.Path["path..."] != "src/lib/main.go" {
+		t.Errorf("expected path param 'path...' = 'src/lib/main.go', got %q", params.Path["path..."])
+	}
+}
+
 func TestHandler_ExtractParams_MissingPathParam(t *testing.T) {
 	handler := NewHandler[NoBody, testOutput](
 		"test",
