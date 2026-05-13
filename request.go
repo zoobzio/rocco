@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 )
 
 // noBodyTypeName is the sentinel type name for handlers without a request body.
@@ -43,7 +44,8 @@ func extractParams(_ context.Context, r *http.Request, pathParams, queryParams [
 
 	// Extract path params using Go 1.22+ PathValue.
 	for _, param := range pathParams {
-		if val := r.PathValue(param); val != "" {
+		lookupKey := strings.TrimSuffix(param, "...")
+		if val := r.PathValue(lookupKey); val != "" {
 			params.Path[param] = val
 		} else {
 			return nil, fmt.Errorf("path parameter %q", param)
