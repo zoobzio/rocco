@@ -2,7 +2,7 @@ package rocco
 
 import (
 	"context"
-	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -370,17 +370,24 @@ func NewHandler[In, Out any](name string, method, path string, fn func(*Request[
 	}
 }
 
-// generateHandlerName creates a unique handler name from method and path.
-// Format: "method-path-segments-xxxxxxxx" where xxxxxxxx is 8 random hex chars.
+// generateHandlerName creates a stable, unique handler name from method and path.
+// Format: "method-path-segments-xxxxxxxx" where xxxxxxxx is an 8-char hex hash of
+// the raw "method path" — deterministic across process restarts.
 // Example: GET /users/{id} -> "get-users-id-a3f1b2c4".
+//
+// The name becomes the OpenAPI operationId and the handler name in log/error
+// events, so it must not change between runs. The suffix is a short hash rather
+// than the readable segments alone because two distinct routes can collapse to
+// the same segments (e.g. "/users/{id}" and "/users/id" both yield "users-id");
+// hashing the raw method+path keeps them distinct. Use WithName to override.
 func generateHandlerName(method, path string) string {
 	// Normalise method to lowercase
 	name := strings.ToLower(method)
 
 	// Process path segments
-	path = strings.Trim(path, "/")
-	if path != "" {
-		segments := strings.Split(path, "/")
+	trimmed := strings.Trim(path, "/")
+	if trimmed != "" {
+		segments := strings.Split(trimmed, "/")
 		for _, seg := range segments {
 			// Strip braces from path params: {id} -> id
 			seg = strings.TrimPrefix(seg, "{")
@@ -391,13 +398,11 @@ func generateHandlerName(method, path string) string {
 		}
 	}
 
-	// Append 8 random hex chars for uniqueness
-	suffix := make([]byte, 4)
-	if _, err := rand.Read(suffix); err != nil {
-		// Fallback if crypto/rand fails (shouldn't happen)
-		suffix = []byte{0x00, 0x00, 0x00, 0x00}
-	}
-	name += "-" + hex.EncodeToString(suffix)
+	// Append 8 hex chars derived from a stable hash of the raw method+path.
+	// Deterministic so operationIds and telemetry keys stay constant across
+	// restarts; the raw path disambiguates segment collisions.
+	sum := sha256.Sum256([]byte(method + " " + path))
+	name += "-" + hex.EncodeToString(sum[:4])
 
 	return name
 }
