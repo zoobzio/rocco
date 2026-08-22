@@ -1140,14 +1140,36 @@ func TestGenerateHandlerName(t *testing.T) {
 	}
 }
 
-func TestGenerateHandlerName_Uniqueness(t *testing.T) {
-	names := make(map[string]bool)
+func TestGenerateHandlerName_Deterministic(t *testing.T) {
+	// Same method+path must always produce the same name so operationIds and
+	// telemetry keys stay stable across process restarts (issue #33).
+	first := generateHandlerName("GET", "/test")
 	for i := 0; i < 100; i++ {
-		name := generateHandlerName("GET", "/test")
-		if names[name] {
-			t.Errorf("duplicate name generated: %s", name)
+		if got := generateHandlerName("GET", "/test"); got != first {
+			t.Errorf("non-deterministic name: got %q, want %q", got, first)
 		}
-		names[name] = true
+	}
+}
+
+func TestGenerateHandlerName_DistinctRoutes(t *testing.T) {
+	// Different routes must produce different names, including routes whose
+	// readable segments collide (a path param vs a literal of the same name).
+	routes := []struct{ method, path string }{
+		{"GET", "/users"},
+		{"POST", "/users"},
+		{"GET", "/users/{id}"},
+		{"GET", "/users/id"}, // collides on segments with the line above
+		{"PUT", "/users/{id}/profile"},
+		{"DELETE", "/users/{id}"},
+	}
+
+	seen := make(map[string]string, len(routes))
+	for _, r := range routes {
+		name := generateHandlerName(r.method, r.path)
+		if prev, dup := seen[name]; dup {
+			t.Errorf("collision: %s %s and %s both produced %q", r.method, r.path, prev, name)
+		}
+		seen[name] = r.method + " " + r.path
 	}
 }
 
