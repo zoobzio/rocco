@@ -8,6 +8,10 @@ By participating in this project, you agree to maintain a respectful and inclusi
 
 ## Getting Started
 
+On a machine without Go installed (fresh workstation, CI runner, agent sandbox),
+`./scripts/setup-dev.sh` bootstraps everything: the Go toolchain, golangci-lint,
+and gosec, then verifies the workspace builds. It is idempotent and prompt-free.
+
 1. Fork the repository
 2. Clone your fork: `git clone https://github.com/yourusername/rocco.git`
 3. Create a feature branch: `git checkout -b feature/your-feature-name`
