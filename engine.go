@@ -97,6 +97,20 @@ func (e *Engine) WithTLSConfig(config *tls.Config) *Engine {
 	return e
 }
 
+// WithTimeouts sets the server's read, write, and idle timeouts.
+//
+// WriteTimeout caps the duration of a single response. Stream handlers are
+// exempt: they clear their own write deadline so a long-lived stream is not
+// terminated at WriteTimeout. ReadTimeout and IdleTimeout apply to all routes.
+//
+// A zero value disables the corresponding timeout.
+func (e *Engine) WithTimeouts(read, write, idle time.Duration) *Engine {
+	e.config.ReadTimeout = read
+	e.config.WriteTimeout = write
+	e.config.IdleTimeout = idle
+	return e
+}
+
 // WithSpec sets the engine specification for OpenAPI generation.
 func (e *Engine) WithSpec(spec *EngineSpec) *Engine {
 	e.spec = spec

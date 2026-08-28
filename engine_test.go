@@ -52,6 +52,20 @@ func TestNewEngine_DefaultConfig(t *testing.T) {
 	}
 }
 
+func TestEngine_WithTimeouts(t *testing.T) {
+	engine := newTestEngine().WithTimeouts(5*time.Second, 0, 30*time.Second)
+
+	if engine.config.ReadTimeout != 5*time.Second {
+		t.Errorf("expected read timeout 5s, got %v", engine.config.ReadTimeout)
+	}
+	if engine.config.WriteTimeout != 0 {
+		t.Errorf("expected write timeout 0, got %v", engine.config.WriteTimeout)
+	}
+	if engine.config.IdleTimeout != 30*time.Second {
+		t.Errorf("expected idle timeout 30s, got %v", engine.config.IdleTimeout)
+	}
+}
+
 func TestEngine_Router(t *testing.T) {
 	engine := newTestEngine()
 

@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/zoobz-io/capitan"
 	"github.com/zoobz-io/sentinel"
@@ -129,6 +130,9 @@ type StreamHandler[In, Out any] struct {
 	// Validation flag (checked once at creation time).
 	inputValidatable bool // True if In implements Validatable.
 
+	// Maximum initial request body size in bytes (0 = unlimited, default: 10MB).
+	maxBodySize int64
+
 	// Middleware.
 	middleware []func(http.Handler) http.Handler
 }
@@ -165,8 +169,25 @@ func (h *StreamHandler[In, Out]) Process(ctx context.Context, r *http.Request, w
 	// Parse request body (for POST/PUT streams with initial payload).
 	var input In
 	if h.InputMeta.TypeName != noBodyTypeName && r.Body != nil {
+		// Limit body size if configured - use MaxBytesReader for proper 413 errors.
+		if h.maxBodySize > 0 {
+			r.Body = http.MaxBytesReader(w, r.Body, h.maxBodySize)
+		}
+
 		body, readErr := io.ReadAll(r.Body)
 		if readErr != nil {
+			// Check if this is a max bytes exceeded error.
+			var maxBytesErr *http.MaxBytesError
+			if errors.As(readErr, &maxBytesErr) {
+				capitan.Warn(ctx, RequestBodyReadError,
+					HandlerNameKey.Field(h.spec.Name),
+					ErrorKey.Field("payload too large"),
+				)
+				writeError(ctx, w, ErrPayloadTooLarge.WithDetails(PayloadTooLargeDetails{
+					MaxSize: h.maxBodySize,
+				}), defaultCodec.ContentType(), h.spec.Name)
+				return http.StatusRequestEntityTooLarge, readErr
+			}
 			capitan.Error(ctx, RequestBodyReadError,
 				HandlerNameKey.Field(h.spec.Name),
 				ErrorKey.Field(readErr.Error()),
@@ -222,6 +243,17 @@ func (h *StreamHandler[In, Out]) Process(ctx context.Context, r *http.Request, w
 		Params:   params,
 		Body:     input,
 		Identity: identity,
+	}
+
+	// Clear the write deadline for this connection. The server's WriteTimeout
+	// caps the duration of a single response, which would tear down a long-lived
+	// stream mid-flight. Streams are unbounded by design, so the write deadline
+	// does not apply. Best-effort: some ResponseWriters do not support deadlines.
+	if err := http.NewResponseController(w).SetWriteDeadline(time.Time{}); err != nil {
+		capitan.Warn(ctx, StreamError,
+			HandlerNameKey.Field(h.spec.Name),
+			ErrorKey.Field(fmt.Sprintf("could not clear write deadline: %v", err)),
+		)
 	}
 
 	// Set SSE headers
@@ -335,8 +367,17 @@ func NewStreamHandler[In, Out any](name string, method, path string, fn func(*Re
 		InputMeta:        inputMeta,
 		OutputMeta:       outputMeta,
 		inputValidatable: inputValidatable,
+		maxBodySize:      10 * 1024 * 1024, // Default to 10MB.
 		middleware:       make([]func(http.Handler) http.Handler, 0),
 	}
+}
+
+// WithMaxBodySize sets the maximum initial request body size in bytes for this
+// stream handler. Applies to the payload of POST/PUT streams. A value of 0
+// disables the limit.
+func (h *StreamHandler[In, Out]) WithMaxBodySize(size int64) *StreamHandler[In, Out] {
+	h.maxBodySize = size
+	return h
 }
 
 // WithSummary sets the OpenAPI summary.
