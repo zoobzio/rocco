@@ -58,11 +58,11 @@ func TestNewStreamHandler(t *testing.T) {
 	if spec.Path != "/events" {
 		t.Errorf("expected path '/events', got %q", spec.Path)
 	}
-	if !spec.IsStream {
-		t.Error("expected IsStream to be true")
+	if spec.Response.Kind != BodyStream {
+		t.Error("expected Response.Kind to be BodyStream")
 	}
-	if spec.SuccessStatus != 200 {
-		t.Errorf("expected default success status 200, got %d", spec.SuccessStatus)
+	if spec.Response.Status != 200 {
+		t.Errorf("expected default success status 200, got %d", spec.Response.Status)
 	}
 	if handler.InputMeta.TypeName != "NoBody" {
 		t.Errorf("expected input type 'NoBody', got %q", handler.InputMeta.TypeName)
@@ -101,8 +101,8 @@ func TestStreamHandler_WithBuilderMethods(t *testing.T) {
 	if len(spec.Tags) != 2 {
 		t.Errorf("expected 2 tags, got %d", len(spec.Tags))
 	}
-	if !spec.IsStream {
-		t.Error("expected IsStream to be true")
+	if spec.Response.Kind != BodyStream {
+		t.Error("expected Response.Kind to be BodyStream")
 	}
 	if len(spec.PathParams) != 1 {
 		t.Errorf("expected 1 path param, got %d", len(spec.PathParams))
@@ -110,8 +110,8 @@ func TestStreamHandler_WithBuilderMethods(t *testing.T) {
 	if len(spec.QueryParams) != 1 {
 		t.Errorf("expected 1 query param, got %d", len(spec.QueryParams))
 	}
-	if len(spec.ErrorCodes) != 2 {
-		t.Errorf("expected 2 error codes, got %d", len(spec.ErrorCodes))
+	if len(handler.ErrorDefs()) != 2 {
+		t.Errorf("expected 2 error definitions, got %d", len(handler.ErrorDefs()))
 	}
 	if !spec.RequiresAuth {
 		t.Error("expected RequiresAuth to be true")
@@ -892,13 +892,13 @@ func TestStreamHandler_WithMaxBodySize(t *testing.T) {
 		func(_ *Request[streamInput], _ Stream[streamEvent]) error { return nil },
 	)
 
-	if handler.maxBodySize != 10*1024*1024 {
-		t.Errorf("expected default maxBodySize 10MB, got %d", handler.maxBodySize)
+	if handler.Spec().Request.MaxBytes != 10*1024*1024 {
+		t.Errorf("expected default Request.MaxBytes 10MB, got %d", handler.Spec().Request.MaxBytes)
 	}
 
 	handler.WithMaxBodySize(1024)
-	if handler.maxBodySize != 1024 {
-		t.Errorf("expected maxBodySize 1024, got %d", handler.maxBodySize)
+	if handler.Spec().Request.MaxBytes != 1024 {
+		t.Errorf("expected Request.MaxBytes 1024, got %d", handler.Spec().Request.MaxBytes)
 	}
 }
 

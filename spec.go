@@ -2,6 +2,39 @@ package rocco
 
 import "github.com/zoobz-io/openapi"
 
+// BodyKind enumerates how a request or response body is produced or consumed.
+type BodyKind string
+
+const (
+	// BodyEncoded is a codec-encoded typed value (the default).
+	BodyEncoded BodyKind = "encoded"
+	// BodyNone means no body is read or written.
+	BodyNone BodyKind = "none"
+	// BodyStream is a Server-Sent Events stream.
+	BodyStream BodyKind = "stream"
+)
+
+// RequestContract declares how a handler consumes the request body.
+// It is filled by the handler constructors from the input type parameter;
+// users do not set it directly.
+type RequestContract struct {
+	Kind BodyKind `json:"kind" yaml:"kind"`
+	// MaxBytes is the maximum request body size (0 = unlimited).
+	MaxBytes int64 `json:"maxBytes,omitempty" yaml:"maxBytes,omitempty"`
+}
+
+// ResponseContract declares the success response shape of a handler.
+// It is filled by the handler constructors from the output type parameter;
+// users refine it through builder methods such as WithSuccessStatus.
+// Both the runtime write path and OpenAPI generation read this contract,
+// so they cannot disagree.
+type ResponseContract struct {
+	Kind   BodyKind `json:"kind" yaml:"kind"`
+	Status int      `json:"status" yaml:"status"`
+	// Redirect marks a BodyNone response that carries a Location header.
+	Redirect bool `json:"redirect,omitempty" yaml:"redirect,omitempty"`
+}
+
 // HandlerSpec contains declarative configuration for a route handler.
 // This spec is serializable and represents all metadata about a handler
 // that can be used for documentation, authorization checks, and filtering.
@@ -17,15 +50,15 @@ type HandlerSpec struct {
 	Tags        []string `json:"tags,omitempty" yaml:"tags,omitempty"`
 
 	// Request/Response
-	PathParams     []string `json:"pathParams,omitempty" yaml:"pathParams,omitempty"`
-	QueryParams    []string `json:"queryParams,omitempty" yaml:"queryParams,omitempty"`
-	InputTypeFQDN  string   `json:"-" yaml:"-"`
-	InputTypeName  string   `json:"inputTypeName" yaml:"inputTypeName"`
-	OutputTypeFQDN string   `json:"-" yaml:"-"`
-	OutputTypeName string   `json:"outputTypeName" yaml:"outputTypeName"`
-	SuccessStatus  int      `json:"successStatus" yaml:"successStatus"`
-	ErrorCodes     []int    `json:"errorCodes,omitempty" yaml:"errorCodes,omitempty"`
-	ContentType    string   `json:"contentType,omitempty" yaml:"contentType,omitempty"` // MIME type for request/response bodies
+	PathParams     []string         `json:"pathParams,omitempty" yaml:"pathParams,omitempty"`
+	QueryParams    []string         `json:"queryParams,omitempty" yaml:"queryParams,omitempty"`
+	InputTypeFQDN  string           `json:"-" yaml:"-"`
+	InputTypeName  string           `json:"inputTypeName" yaml:"inputTypeName"`
+	OutputTypeFQDN string           `json:"-" yaml:"-"`
+	OutputTypeName string           `json:"outputTypeName" yaml:"outputTypeName"`
+	Request        RequestContract  `json:"request" yaml:"request"`
+	Response       ResponseContract `json:"response" yaml:"response"`
+	ContentType    string           `json:"contentType,omitempty" yaml:"contentType,omitempty"` // Codec MIME type for encoded bodies
 
 	// Authentication & Authorization
 	RequiresAuth bool       `json:"requiresAuth" yaml:"requiresAuth"`
@@ -34,9 +67,6 @@ type HandlerSpec struct {
 
 	// Rate Limiting
 	UsageLimits []UsageLimit `json:"usageLimits,omitempty" yaml:"usageLimits,omitempty"`
-
-	// Streaming
-	IsStream bool `json:"isStream,omitempty" yaml:"isStream,omitempty"` // SSE stream handler
 }
 
 // EngineSpec contains declarative configuration for the API engine.

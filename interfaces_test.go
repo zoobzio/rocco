@@ -43,8 +43,7 @@ func TestEndpoint_Interface(t *testing.T) {
 			QueryParams:    []string{"page"},
 			InputTypeName:  "MockInput",
 			OutputTypeName: "MockOutput",
-			SuccessStatus:  200,
-			ErrorCodes:     []int{404, 500},
+			Response:       ResponseContract{Kind: BodyEncoded, Status: 200},
 		},
 	}
 
@@ -74,11 +73,11 @@ func TestEndpoint_Interface(t *testing.T) {
 	if len(spec.QueryParams) != 1 || spec.QueryParams[0] != "page" {
 		t.Errorf("expected query params ['page'], got %v", spec.QueryParams)
 	}
-	if spec.SuccessStatus != 200 {
-		t.Errorf("expected success status 200, got %d", spec.SuccessStatus)
+	if spec.Response.Status != 200 {
+		t.Errorf("expected success status 200, got %d", spec.Response.Status)
 	}
-	if len(spec.ErrorCodes) != 2 {
-		t.Errorf("expected 2 error codes, got %d", len(spec.ErrorCodes))
+	if spec.Response.Kind != BodyEncoded {
+		t.Errorf("expected response kind %q, got %q", BodyEncoded, spec.Response.Kind)
 	}
 	if spec.InputTypeName != "MockInput" {
 		t.Errorf("expected input type 'MockInput', got %q", spec.InputTypeName)

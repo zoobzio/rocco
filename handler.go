@@ -34,7 +34,6 @@ type Handler[In, Out any] struct {
 
 	// Runtime configuration
 	responseHeaders map[string]string // Default response headers.
-	maxBodySize     int64             // Maximum request body size in bytes (0 = unlimited, default: 10MB).
 	validateOutput  bool              // Whether to validate output structs (disabled by default).
 	codec           Codec             // Codec for request/response serialization.
 	codecExplicit   bool              // True if codec was explicitly set via WithCodec.
@@ -78,10 +77,10 @@ func (h *Handler[In, Out]) Process(ctx context.Context, r *http.Request, w http.
 
 	// Parse request body.
 	var input In
-	if h.InputMeta.TypeName != noBodyTypeName && r.Body != nil {
+	if h.spec.Request.Kind != BodyNone && r.Body != nil {
 		// Limit body size if configured - use MaxBytesReader for proper 413 errors
-		if h.maxBodySize > 0 {
-			r.Body = http.MaxBytesReader(w, r.Body, h.maxBodySize)
+		if h.spec.Request.MaxBytes > 0 {
+			r.Body = http.MaxBytesReader(w, r.Body, h.spec.Request.MaxBytes)
 		}
 
 		body, readErr := io.ReadAll(r.Body)
@@ -94,7 +93,7 @@ func (h *Handler[In, Out]) Process(ctx context.Context, r *http.Request, w http.
 					ErrorKey.Field("payload too large"),
 				)
 				writeError(ctx, w, ErrPayloadTooLarge.WithDetails(PayloadTooLargeDetails{
-					MaxSize: h.maxBodySize,
+					MaxSize: h.spec.Request.MaxBytes,
 				}), h.spec.Name)
 				return http.StatusRequestEntityTooLarge, readErr
 			}
@@ -219,8 +218,15 @@ func (h *Handler[In, Out]) Process(ctx context.Context, r *http.Request, w http.
 		}
 	}
 
-	// Check for redirect response.
-	if redirect, ok := any(output).(Redirect); ok {
+	// Write the response according to the declared contract. The contract was
+	// derived from the Out type at construction, so the runtime write path and
+	// OpenAPI generation read the same declaration and cannot disagree.
+	switch h.spec.Response.Kind {
+	case BodyNone:
+		// For Handler, BodyNone currently always means a redirect (Out == Redirect).
+		//nolint:errcheck // The assertion cannot fail: BodyNone is only set by NewHandler when Out is Redirect.
+		redirect, _ := any(output).(Redirect)
+
 		// Guard against empty URL.
 		if redirect.URL == "" {
 			capitan.Error(ctx, HandlerError,
@@ -231,9 +237,10 @@ func (h *Handler[In, Out]) Process(ctx context.Context, r *http.Request, w http.
 			return http.StatusInternalServerError, nil
 		}
 
+		// The value may override the declared status per response.
 		status := redirect.Status
 		if status == 0 {
-			status = DefaultRedirectStatus
+			status = h.spec.Response.Status
 		}
 
 		// Write custom response headers (e.g., cookies) but NOT Content-Type.
@@ -261,55 +268,56 @@ func (h *Handler[In, Out]) Process(ctx context.Context, r *http.Request, w http.
 		)
 
 		return status, nil
-	}
 
-	// Validate output (opt-in, disabled by default).
-	if h.validateOutput && h.outputValidatable {
-		if v, ok := any(output).(Validatable); ok {
-			if validErr := v.Validate(); validErr != nil {
-				capitan.Warn(ctx, RequestValidationOutputFailed,
-					HandlerNameKey.Field(h.spec.Name),
-					ErrorKey.Field(validErr.Error()),
-				)
-				writeError(ctx, w, ErrInternalServer.WithCause(fmt.Errorf("output validation failed: %w", validErr)), h.spec.Name)
-				return http.StatusInternalServerError, fmt.Errorf("output validation failed: %w", validErr)
+	default: // BodyEncoded
+		// Validate output (opt-in, disabled by default).
+		if h.validateOutput && h.outputValidatable {
+			if v, ok := any(output).(Validatable); ok {
+				if validErr := v.Validate(); validErr != nil {
+					capitan.Warn(ctx, RequestValidationOutputFailed,
+						HandlerNameKey.Field(h.spec.Name),
+						ErrorKey.Field(validErr.Error()),
+					)
+					writeError(ctx, w, ErrInternalServer.WithCause(fmt.Errorf("output validation failed: %w", validErr)), h.spec.Name)
+					return http.StatusInternalServerError, fmt.Errorf("output validation failed: %w", validErr)
+				}
 			}
 		}
-	}
 
-	// Marshal response.
-	body, err := h.codec.Marshal(output)
-	if err != nil {
-		capitan.Error(ctx, RequestResponseMarshalError,
+		// Marshal response.
+		body, err := h.codec.Marshal(output)
+		if err != nil {
+			capitan.Error(ctx, RequestResponseMarshalError,
+				HandlerNameKey.Field(h.spec.Name),
+				ErrorKey.Field(err.Error()),
+			)
+			writeError(ctx, w, ErrInternalServer.WithCause(err), h.spec.Name)
+			return http.StatusInternalServerError, err
+		}
+
+		// Write response headers.
+		for key, value := range h.responseHeaders {
+			w.Header().Set(key, value)
+		}
+		w.Header().Set("Content-Type", h.spec.ContentType)
+
+		// Write status and body.
+		w.WriteHeader(h.spec.Response.Status)
+		if _, err := w.Write(body); err != nil {
+			capitan.Warn(ctx, ResponseWriteError,
+				HandlerNameKey.Field(h.spec.Name),
+				ErrorKey.Field(err.Error()),
+			)
+		}
+
+		// Emit handler success event
+		capitan.Info(ctx, HandlerSuccess,
 			HandlerNameKey.Field(h.spec.Name),
-			ErrorKey.Field(err.Error()),
+			StatusCodeKey.Field(h.spec.Response.Status),
 		)
-		writeError(ctx, w, ErrInternalServer.WithCause(err), h.spec.Name)
-		return http.StatusInternalServerError, err
+
+		return h.spec.Response.Status, nil
 	}
-
-	// Write response headers.
-	for key, value := range h.responseHeaders {
-		w.Header().Set(key, value)
-	}
-	w.Header().Set("Content-Type", h.spec.ContentType)
-
-	// Write status and body.
-	w.WriteHeader(h.spec.SuccessStatus)
-	if _, err := w.Write(body); err != nil {
-		capitan.Warn(ctx, ResponseWriteError,
-			HandlerNameKey.Field(h.spec.Name),
-			ErrorKey.Field(err.Error()),
-		)
-	}
-
-	// Emit handler success event
-	capitan.Info(ctx, HandlerSuccess,
-		HandlerNameKey.Field(h.spec.Name),
-		StatusCodeKey.Field(h.spec.SuccessStatus),
-	)
-
-	return h.spec.SuccessStatus, nil
 }
 
 // Spec implements Endpoint.
@@ -335,6 +343,29 @@ func NewHandler[In, Out any](name string, method, path string, fn func(*Request[
 	_, inputEntryable := any(&zeroIn).(Entryable)
 	_, outputSendable := any(&zeroOut).(Sendable)
 
+	// Derive the request/response contracts from the type parameters. The
+	// contract is the single declaration both the runtime write path and
+	// OpenAPI generation consume.
+	request := RequestContract{
+		Kind:     BodyEncoded,
+		MaxBytes: 10 * 1024 * 1024, // Default to 10MB.
+	}
+	if inputMeta.TypeName == noBodyTypeName {
+		request.Kind = BodyNone
+	}
+
+	response := ResponseContract{
+		Kind:   BodyEncoded,
+		Status: http.StatusOK, // Default to 200.
+	}
+	if _, isRedirect := any(zeroOut).(Redirect); isRedirect {
+		response = ResponseContract{
+			Kind:     BodyNone,
+			Status:   DefaultRedirectStatus,
+			Redirect: true,
+		}
+	}
+
 	return &Handler[In, Out]{
 		fn: fn,
 		spec: HandlerSpec{
@@ -347,8 +378,8 @@ func NewHandler[In, Out any](name string, method, path string, fn func(*Request[
 			InputTypeName:  inputMeta.TypeName,
 			OutputTypeFQDN: outputMeta.FQDN,
 			OutputTypeName: outputMeta.TypeName,
-			SuccessStatus:  http.StatusOK, // Default to 200.
-			ErrorCodes:     []int{},
+			Request:        request,
+			Response:       response,
 			ContentType:    defaultCodec.ContentType(),
 			RequiresAuth:   false,
 			ScopeGroups:    [][]string{},
@@ -357,7 +388,6 @@ func NewHandler[In, Out any](name string, method, path string, fn func(*Request[
 			Tags:           []string{},
 		},
 		responseHeaders:   make(map[string]string),
-		maxBodySize:       10 * 1024 * 1024, // Default to 10MB.
 		codec:             defaultCodec,
 		InputMeta:         inputMeta,
 		OutputMeta:        outputMeta,
@@ -458,8 +488,10 @@ func (h *Handler[In, Out]) WithTags(tags ...string) *Handler[In, Out] {
 }
 
 // WithSuccessStatus sets the HTTP status code for successful responses.
+// For redirect handlers this sets the default redirect status; a nonzero
+// Redirect.Status on the returned value overrides it per response.
 func (h *Handler[In, Out]) WithSuccessStatus(status int) *Handler[In, Out] {
-	h.spec.SuccessStatus = status
+	h.spec.Response.Status = status
 	return h
 }
 
@@ -488,11 +520,6 @@ func (h *Handler[In, Out]) WithErrors(errs ...ErrorDefinition) *Handler[In, Out]
 	for _, err := range errs {
 		h.errorDefs[err.Code()] = err
 	}
-	// Rebuild ErrorCodes from deduplicated map
-	h.spec.ErrorCodes = make([]int, 0, len(h.errorDefs))
-	for _, err := range h.errorDefs {
-		h.spec.ErrorCodes = append(h.spec.ErrorCodes, err.Status())
-	}
 	return h
 }
 
@@ -509,7 +536,7 @@ func (h *Handler[In, Out]) ErrorDefs() []ErrorDefinition {
 // WithMaxBodySize sets the maximum request body size in bytes for this handler.
 // Set to 0 for unlimited (not recommended for production).
 func (h *Handler[In, Out]) WithMaxBodySize(size int64) *Handler[In, Out] {
-	h.maxBodySize = size
+	h.spec.Request.MaxBytes = size
 	return h
 }
 

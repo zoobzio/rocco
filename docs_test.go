@@ -1,6 +1,7 @@
 package rocco
 
 import (
+	"net/http"
 	"testing"
 
 	"github.com/zoobz-io/openapi"
@@ -560,10 +561,9 @@ func TestGenerateOpenAPI_ErrorDeduplication(t *testing.T) {
 		t.Errorf("expected 3 responses (200, 400, 404), got %d", len(pathItem.Get.Responses))
 	}
 
-	// ErrorCodes on spec should also be deduplicated
-	handlerSpec := handler.Spec()
-	if len(handlerSpec.ErrorCodes) != 2 {
-		t.Errorf("expected 2 error codes, got %d", len(handlerSpec.ErrorCodes))
+	// Declared error definitions should be deduplicated by code
+	if len(handler.ErrorDefs()) != 2 {
+		t.Errorf("expected 2 error definitions, got %d", len(handler.ErrorDefs()))
 	}
 }
 
@@ -1818,8 +1818,8 @@ func TestMetadataToSchema_DiscriminatedUnion(t *testing.T) {
 				Name: "Event",
 				Type: "any",
 				Tags: map[string]string{
-					"json":          "event",
-					"discriminate":  "IngestCompletedEvent,IngestFailedEvent",
+					"json":         "event",
+					"discriminate": "IngestCompletedEvent,IngestFailedEvent",
 				},
 			},
 		},
@@ -1992,4 +1992,74 @@ func TestGenerateOpenAPI_DiscriminatedUnion(t *testing.T) {
 			t.Errorf("expected 2 mapping entries, got %d", len(eventProp.Discriminator.Mapping))
 		}
 	})
+}
+
+// TestGenerateOpenAPI_RedirectHandler verifies the spec matches what the
+// runtime write path actually does for redirect handlers: a 3xx response
+// with a Location header, no body, and no marker-type schemas in components.
+// Both sides read the same ResponseContract, so this cannot drift.
+func TestGenerateOpenAPI_RedirectHandler(t *testing.T) {
+	engine := NewEngine()
+	handler := GET[NoBody, Redirect]("/old-path",
+		func(_ *Request[NoBody]) (Redirect, error) {
+			return Redirect{URL: "/new"}, nil
+		})
+	engine.WithHandlers(handler)
+
+	spec := engine.GenerateOpenAPI(nil)
+
+	op := spec.Paths["/old-path"].Get
+	if op == nil {
+		t.Fatal("expected GET operation")
+	}
+
+	resp, ok := op.Responses["302"]
+	if !ok {
+		t.Fatalf("expected 302 response, got keys: %v", responseKeys(op.Responses))
+	}
+	if resp.Content != nil {
+		t.Error("redirect response must not declare a content schema")
+	}
+	if resp.Headers["Location"] == nil {
+		t.Error("redirect response must declare the Location header")
+	}
+	if _, exists := op.Responses["200"]; exists {
+		t.Error("redirect handler must not declare a 200 response")
+	}
+
+	// Marker types must not pollute component schemas.
+	if _, exists := spec.Components.Schemas["Redirect"]; exists {
+		t.Error("Redirect marker type must not appear in components")
+	}
+	if _, exists := spec.Components.Schemas["Header"]; exists {
+		t.Error("dangling Header schema must not appear in components")
+	}
+}
+
+func responseKeys(m map[string]openapi.Response) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
+// TestGenerateOpenAPI_RedirectStatusOverride verifies WithSuccessStatus
+// changes the documented redirect status via the response contract.
+func TestGenerateOpenAPI_RedirectStatusOverride(t *testing.T) {
+	engine := NewEngine()
+	handler := GET[NoBody, Redirect]("/moved",
+		func(_ *Request[NoBody]) (Redirect, error) {
+			return Redirect{URL: "/new"}, nil
+		}).WithSuccessStatus(http.StatusMovedPermanently)
+	engine.WithHandlers(handler)
+
+	spec := engine.GenerateOpenAPI(nil)
+	op := spec.Paths["/moved"].Get
+	if op == nil {
+		t.Fatal("expected GET operation")
+	}
+	if _, ok := op.Responses["301"]; !ok {
+		t.Errorf("expected 301 response, got keys: %v", responseKeys(op.Responses))
+	}
 }

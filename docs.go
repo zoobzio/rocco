@@ -799,8 +799,8 @@ func (e *Engine) GenerateOpenAPI(identity Identity) *openapi.OpenAPI {
 			})
 		}
 
-		// Add request body if not NoBody
-		if handlerSpec.InputTypeName != "NoBody" {
+		// Add request body according to the declared request contract.
+		if handlerSpec.Request.Kind == BodyEncoded {
 			// Recursively collect input type and all nested types
 			if inputMeta, found := sentinel.Lookup(handlerSpec.InputTypeFQDN); found {
 				collectSchemas(inputMeta)
@@ -820,15 +820,17 @@ func (e *Engine) GenerateOpenAPI(identity Identity) *openapi.OpenAPI {
 			}
 		}
 
-		// Add success response
-		// Recursively collect output type and all nested types
-		if outputMeta, found := sentinel.Lookup(handlerSpec.OutputTypeFQDN); found {
-			collectSchemas(outputMeta)
-		}
-
-		if handlerSpec.IsStream {
-			// SSE stream response
-			operation.Responses[fmt.Sprintf("%d", handlerSpec.SuccessStatus)] = openapi.Response{
+		// Add success response according to the declared response contract.
+		// This is the same declaration the runtime write path executes, so the
+		// spec cannot describe behavior the handler does not have.
+		successStatus := fmt.Sprintf("%d", handlerSpec.Response.Status)
+		switch handlerSpec.Response.Kind {
+		case BodyStream:
+			// SSE stream response. Event schemas resolve through the output type.
+			if outputMeta, found := sentinel.Lookup(handlerSpec.OutputTypeFQDN); found {
+				collectSchemas(outputMeta)
+			}
+			operation.Responses[successStatus] = openapi.Response{
 				Description: "Server-Sent Events stream",
 				Content: map[string]openapi.MediaType{
 					"text/event-stream": {
@@ -839,13 +841,30 @@ func (e *Engine) GenerateOpenAPI(identity Identity) *openapi.OpenAPI {
 					},
 				},
 			}
-		} else {
-			// Standard response
+		case BodyNone:
+			// No body. The output type is a marker (e.g. Redirect) and must not
+			// appear in component schemas.
+			resp := openapi.Response{Description: "No content"}
+			if handlerSpec.Response.Redirect {
+				resp.Description = "Redirect"
+				resp.Headers = map[string]*openapi.Header{
+					"Location": {
+						Description: "Redirect target URL",
+						Schema:      &openapi.Schema{Type: openapi.NewSchemaType("string")},
+					},
+				}
+			}
+			operation.Responses[successStatus] = resp
+		default: // BodyEncoded
+			// Recursively collect output type and all nested types
+			if outputMeta, found := sentinel.Lookup(handlerSpec.OutputTypeFQDN); found {
+				collectSchemas(outputMeta)
+			}
 			responseContentType := handlerSpec.ContentType
 			if responseContentType == "" {
 				responseContentType = ContentTypeJSON
 			}
-			operation.Responses[fmt.Sprintf("%d", handlerSpec.SuccessStatus)] = openapi.Response{
+			operation.Responses[successStatus] = openapi.Response{
 				Description: "Success",
 				Content: map[string]openapi.MediaType{
 					responseContentType: {
