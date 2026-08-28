@@ -883,3 +883,96 @@ func TestStreamHandler_Process_WithIdentityInContext(t *testing.T) {
 	}
 }
 
+
+// TestStreamHandler_WithMaxBodySize verifies the default cap and the setter.
+func TestStreamHandler_WithMaxBodySize(t *testing.T) {
+	handler := NewStreamHandler[streamInput, streamEvent](
+		"test-stream", "POST", "/events",
+		func(_ *Request[streamInput], _ Stream[streamEvent]) error { return nil },
+	)
+
+	if handler.maxBodySize != 10*1024*1024 {
+		t.Errorf("expected default maxBodySize 10MB, got %d", handler.maxBodySize)
+	}
+
+	handler.WithMaxBodySize(1024)
+	if handler.maxBodySize != 1024 {
+		t.Errorf("expected maxBodySize 1024, got %d", handler.maxBodySize)
+	}
+}
+
+// TestStreamHandler_Process_MaxBodySizeExceeded verifies an oversized initial
+// payload is rejected with 413 instead of read unbounded.
+func TestStreamHandler_Process_MaxBodySizeExceeded(t *testing.T) {
+	handler := NewStreamHandler[streamInput, streamEvent](
+		"test-stream", "POST", "/events",
+		func(_ *Request[streamInput], s Stream[streamEvent]) error {
+			return s.Send(streamEvent{Message: "should not reach here"})
+		},
+	).WithMaxBodySize(10)
+
+	largeBody := bytes.Repeat([]byte("a"), 100)
+	req := httptest.NewRequest("POST", "/events", bytes.NewReader(largeBody))
+	w := newFlushRecorder()
+
+	_, err := handler.Process(context.Background(), req, w)
+	if err == nil {
+		t.Fatal("expected error for body size exceeded")
+	}
+	if w.Code != http.StatusRequestEntityTooLarge {
+		t.Errorf("expected status 413, got %d", w.Code)
+	}
+
+	var response map[string]any
+	json.Unmarshal(w.Body.Bytes(), &response)
+	if response["code"] != "PAYLOAD_TOO_LARGE" {
+		t.Errorf("expected code 'PAYLOAD_TOO_LARGE', got %v", response["code"])
+	}
+}
+
+// TestStreamHandler_OutlivesWriteTimeout is the regression test for #36: a
+// stream must keep delivering events past the server's WriteTimeout instead of
+// having its connection torn down mid-stream.
+func TestStreamHandler_OutlivesWriteTimeout(t *testing.T) {
+	const events = 3
+	const gap = 80 * time.Millisecond
+
+	handler := NewStreamHandler[NoBody, streamEvent](
+		"ticker", "GET", "/ticker",
+		func(_ *Request[NoBody], s Stream[streamEvent]) error {
+			for i := 0; i < events; i++ {
+				time.Sleep(gap)
+				if err := s.Send(streamEvent{Message: "tick", Count: i}); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+	)
+
+	engine := NewEngine().WithHandlers(handler)
+	ts := httptest.NewUnstartedServer(engine.Router())
+	ts.Config.WriteTimeout = 50 * time.Millisecond // shorter than a single gap
+	ts.Start()
+	defer ts.Close()
+
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, ts.URL+"/ticker", nil)
+	if err != nil {
+		t.Fatalf("building request failed: %v", err)
+	}
+	resp, err := ts.Client().Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("reading stream body failed (connection torn down?): %v", err)
+	}
+
+	got := strings.Count(string(body), "data:")
+	if got != events {
+		t.Errorf("expected %d events past WriteTimeout, got %d\nbody: %q", events, got, body)
+	}
+}

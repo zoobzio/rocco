@@ -11,17 +11,9 @@ const (
 )
 
 // EngineConfig holds configuration for the Engine.
+// Set values via Engine.WithTimeouts; NewEngine applies the defaults.
 type EngineConfig struct {
 	ReadTimeout  time.Duration // Maximum duration for reading entire request
-	WriteTimeout time.Duration // Maximum duration for writing response
+	WriteTimeout time.Duration // Maximum duration for writing response (streams are exempt)
 	IdleTimeout  time.Duration // Maximum time to wait for next request on keep-alive
-}
-
-// DefaultConfig returns an EngineConfig with sensible defaults.
-func DefaultConfig() *EngineConfig {
-	return &EngineConfig{
-		ReadTimeout:  10 * time.Second,
-		WriteTimeout: 10 * time.Second,
-		IdleTimeout:  120 * time.Second,
-	}
 }
