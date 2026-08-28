@@ -1462,3 +1462,39 @@ func TestHTTPMethodShortcuts_Chaining(t *testing.T) {
 		t.Error("expected RequiresAuth to be true")
 	}
 }
+
+// TestWriteError_AlwaysJSONContentType verifies that error responses carry a
+// JSON content type even when the handler uses a non-JSON codec, since error
+// bodies are always JSON-encoded.
+func TestWriteError_AlwaysJSONContentType(t *testing.T) {
+	handler := NewHandler[testInput, testOutput](
+		"test-codec-error",
+		"POST",
+		"/test",
+		func(_ *Request[testInput]) (testOutput, error) {
+			return testOutput{}, ErrNotFound
+		},
+	).WithCodec(mockCodec{contentType: "application/x-custom"}).
+		WithErrors(ErrNotFound)
+
+	req := httptest.NewRequest("POST", "/test", strings.NewReader(`{"name":"x","value":1}`))
+	w := httptest.NewRecorder()
+
+	status, err := handler.Process(context.Background(), req, w)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if status != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", status)
+	}
+	if ct := w.Header().Get("Content-Type"); ct != ContentTypeJSON {
+		t.Errorf("error response Content-Type = %q, want %q", ct, ContentTypeJSON)
+	}
+	var resp errorResponse
+	if unmarshalErr := json.Unmarshal(w.Body.Bytes(), &resp); unmarshalErr != nil {
+		t.Fatalf("error body is not JSON: %v", unmarshalErr)
+	}
+	if resp.Code != "NOT_FOUND" {
+		t.Errorf("error code = %q, want NOT_FOUND", resp.Code)
+	}
+}

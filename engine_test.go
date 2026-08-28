@@ -939,7 +939,7 @@ func TestWriteError_EncodeFails(t *testing.T) {
 	w := &failingResponseWriter{}
 
 	// This should not panic - just emit a warning event
-	writeError(ctx, w, ErrBadRequest, "application/json", "test-handler")
+	writeError(ctx, w, ErrBadRequest, "test-handler")
 
 	if w.code != http.StatusBadRequest {
 		t.Errorf("expected status %d, got %d", http.StatusBadRequest, w.code)

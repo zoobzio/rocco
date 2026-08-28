@@ -32,6 +32,43 @@ type Identity interface {
 	Stats() map[string]int
 }
 
+// satisfiesRequirements checks an identity against scope and role requirement
+// groups. Semantics: OR within each group, AND across groups. Scope groups are
+// checked before role groups. Returns the first unsatisfied group (for error
+// reporting) and ok=false, or ok=true when all groups are satisfied.
+//
+// This is the single implementation of authorization semantics, shared by the
+// engine's authorization middleware and OpenAPI handler filtering.
+func satisfiesRequirements(identity Identity, scopeGroups, roleGroups [][]string) (failedScopes, failedRoles []string, ok bool) {
+	for _, scopeGroup := range scopeGroups {
+		hasAnyScope := false
+		for _, scope := range scopeGroup {
+			if identity.HasScope(scope) {
+				hasAnyScope = true
+				break
+			}
+		}
+		if !hasAnyScope {
+			return scopeGroup, nil, false
+		}
+	}
+
+	for _, roleGroup := range roleGroups {
+		hasAnyRole := false
+		for _, role := range roleGroup {
+			if identity.HasRole(role) {
+				hasAnyRole = true
+				break
+			}
+		}
+		if !hasAnyRole {
+			return nil, roleGroup, false
+		}
+	}
+
+	return nil, nil, true
+}
+
 // NoIdentity represents the absence of authentication.
 // Used for public endpoints that don't require authentication.
 type NoIdentity struct{}

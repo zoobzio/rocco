@@ -252,7 +252,7 @@ func (e *Engine) buildAuthMiddleware() func(http.Handler) http.Handler {
 					PathKey.Field(r.URL.Path),
 					ErrorKey.Field(err.Error()),
 				)
-				writeError(ctx, w, ErrUnauthorized, defaultCodec.ContentType(), "auth")
+				writeError(ctx, w, ErrUnauthorized, "auth")
 				return
 			}
 
@@ -291,58 +291,37 @@ func (*Engine) buildAuthorizationMiddleware(handler Endpoint) func(http.Handler)
 			// Extract identity from context (should exist from auth middleware)
 			val := ctx.Value(identityContextKey)
 			if val == nil {
-				writeError(ctx, w, ErrForbidden.WithMessage("identity not found"), defaultCodec.ContentType(), handlerSpec.Name)
+				writeError(ctx, w, ErrForbidden.WithMessage("identity not found"), handlerSpec.Name)
 				return
 			}
 
 			identity, ok := val.(Identity)
 			if !ok {
-				writeError(ctx, w, ErrForbidden.WithMessage("invalid identity"), defaultCodec.ContentType(), handlerSpec.Name)
+				writeError(ctx, w, ErrForbidden.WithMessage("invalid identity"), handlerSpec.Name)
 				return
 			}
 
-			// Check scope requirements (AND across groups, OR within group)
-			for _, scopeGroup := range scopeGroups {
-				hasAnyScope := false
-				for _, scope := range scopeGroup {
-					if identity.HasScope(scope) {
-						hasAnyScope = true
-						break
-					}
-				}
-				if !hasAnyScope {
-					// Missing required scope group
+			// Check scope/role requirements (AND across groups, OR within group)
+			failedScopes, failedRoles, ok := satisfiesRequirements(identity, scopeGroups, roleGroups)
+			if !ok {
+				if failedScopes != nil {
 					capitan.Warn(ctx, AuthorizationScopeDenied,
 						MethodKey.Field(r.Method),
 						PathKey.Field(r.URL.Path),
 						IdentityIDKey.Field(identity.ID()),
-						RequiredScopesKey.Field(strings.Join(scopeGroup, ",")),
+						RequiredScopesKey.Field(strings.Join(failedScopes, ",")),
 					)
-					writeError(ctx, w, ErrForbidden.WithMessage("insufficient scope"), defaultCodec.ContentType(), handlerSpec.Name)
+					writeError(ctx, w, ErrForbidden.WithMessage("insufficient scope"), handlerSpec.Name)
 					return
 				}
-			}
-
-			// Check role requirements (AND across groups, OR within group)
-			for _, roleGroup := range roleGroups {
-				hasAnyRole := false
-				for _, role := range roleGroup {
-					if identity.HasRole(role) {
-						hasAnyRole = true
-						break
-					}
-				}
-				if !hasAnyRole {
-					// Missing required role group
-					capitan.Warn(ctx, AuthorizationRoleDenied,
-						MethodKey.Field(r.Method),
-						PathKey.Field(r.URL.Path),
-						IdentityIDKey.Field(identity.ID()),
-						RequiredRolesKey.Field(strings.Join(roleGroup, ",")),
-					)
-					writeError(ctx, w, ErrForbidden.WithMessage("insufficient role"), defaultCodec.ContentType(), handlerSpec.Name)
-					return
-				}
+				capitan.Warn(ctx, AuthorizationRoleDenied,
+					MethodKey.Field(r.Method),
+					PathKey.Field(r.URL.Path),
+					IdentityIDKey.Field(identity.ID()),
+					RequiredRolesKey.Field(strings.Join(failedRoles, ",")),
+				)
+				writeError(ctx, w, ErrForbidden.WithMessage("insufficient role"), handlerSpec.Name)
+				return
 			}
 
 			// All checks passed
@@ -368,13 +347,13 @@ func (*Engine) buildUsageLimitMiddleware(handler Endpoint) func(http.Handler) ht
 			// Extract identity from context (should exist from auth middleware)
 			val := ctx.Value(identityContextKey)
 			if val == nil {
-				writeError(ctx, w, ErrForbidden.WithMessage("identity not found"), defaultCodec.ContentType(), handlerSpec.Name)
+				writeError(ctx, w, ErrForbidden.WithMessage("identity not found"), handlerSpec.Name)
 				return
 			}
 
 			identity, ok := val.(Identity)
 			if !ok {
-				writeError(ctx, w, ErrForbidden.WithMessage("invalid identity"), defaultCodec.ContentType(), handlerSpec.Name)
+				writeError(ctx, w, ErrForbidden.WithMessage("invalid identity"), handlerSpec.Name)
 				return
 			}
 
@@ -398,7 +377,7 @@ func (*Engine) buildUsageLimitMiddleware(handler Endpoint) func(http.Handler) ht
 						CurrentValueKey.Field(currentValue),
 						ThresholdKey.Field(threshold),
 					)
-					writeError(ctx, w, ErrTooManyRequests, defaultCodec.ContentType(), handlerSpec.Name)
+					writeError(ctx, w, ErrTooManyRequests, handlerSpec.Name)
 					return
 				}
 			}

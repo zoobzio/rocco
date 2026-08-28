@@ -72,7 +72,7 @@ func (h *Handler[In, Out]) Process(ctx context.Context, r *http.Request, w http.
 			HandlerNameKey.Field(h.spec.Name),
 			ErrorKey.Field(err.Error()),
 		)
-		writeError(ctx, w, ErrUnprocessableEntity.WithMessage("invalid parameters").WithCause(err), h.spec.ContentType, h.spec.Name)
+		writeError(ctx, w, ErrUnprocessableEntity.WithMessage("invalid parameters").WithCause(err), h.spec.Name)
 		return http.StatusUnprocessableEntity, err
 	}
 
@@ -95,14 +95,14 @@ func (h *Handler[In, Out]) Process(ctx context.Context, r *http.Request, w http.
 				)
 				writeError(ctx, w, ErrPayloadTooLarge.WithDetails(PayloadTooLargeDetails{
 					MaxSize: h.maxBodySize,
-				}), h.spec.ContentType, h.spec.Name)
+				}), h.spec.Name)
 				return http.StatusRequestEntityTooLarge, readErr
 			}
 			capitan.Error(ctx, RequestBodyReadError,
 				HandlerNameKey.Field(h.spec.Name),
 				ErrorKey.Field(readErr.Error()),
 			)
-			writeError(ctx, w, ErrBadRequest.WithMessage("failed to read request body").WithCause(readErr), h.spec.ContentType, h.spec.Name)
+			writeError(ctx, w, ErrBadRequest.WithMessage("failed to read request body").WithCause(readErr), h.spec.Name)
 			return http.StatusBadRequest, readErr
 		}
 		if closeErr := r.Body.Close(); closeErr != nil {
@@ -118,7 +118,7 @@ func (h *Handler[In, Out]) Process(ctx context.Context, r *http.Request, w http.
 					HandlerNameKey.Field(h.spec.Name),
 					ErrorKey.Field(unmarshalErr.Error()),
 				)
-				writeError(ctx, w, ErrUnprocessableEntity.WithMessage("invalid request body").WithCause(unmarshalErr), h.spec.ContentType, h.spec.Name)
+				writeError(ctx, w, ErrUnprocessableEntity.WithMessage("invalid request body").WithCause(unmarshalErr), h.spec.Name)
 				return http.StatusUnprocessableEntity, unmarshalErr
 			}
 
@@ -130,7 +130,7 @@ func (h *Handler[In, Out]) Process(ctx context.Context, r *http.Request, w http.
 							HandlerNameKey.Field(h.spec.Name),
 							ErrorKey.Field(inputErr.Error()),
 						)
-						writeValidationErrorResponse(ctx, w, inputErr, h.spec.ContentType, h.spec.Name)
+						writeValidationErrorResponse(ctx, w, inputErr, h.spec.Name)
 						return http.StatusUnprocessableEntity, inputErr
 					}
 				}
@@ -146,7 +146,7 @@ func (h *Handler[In, Out]) Process(ctx context.Context, r *http.Request, w http.
 					HandlerNameKey.Field(h.spec.Name),
 					ErrorKey.Field(err.Error()),
 				)
-				writeError(ctx, w, ErrInternalServer.WithCause(err), h.spec.ContentType, h.spec.Name)
+				writeError(ctx, w, ErrInternalServer.WithCause(err), h.spec.Name)
 				return http.StatusInternalServerError, err
 			}
 		}
@@ -182,7 +182,7 @@ func (h *Handler[In, Out]) Process(ctx context.Context, r *http.Request, w http.
 					ErrorKey.Field(err.Error()),
 					StatusCodeKey.Field(e.Status()),
 				)
-				writeError(ctx, w, ErrInternalServer, h.spec.ContentType, h.spec.Name)
+				writeError(ctx, w, ErrInternalServer, h.spec.Name)
 				return http.StatusInternalServerError, fmt.Errorf("undeclared error %s (add to WithErrors)", e.Code())
 			}
 
@@ -192,7 +192,7 @@ func (h *Handler[In, Out]) Process(ctx context.Context, r *http.Request, w http.
 				ErrorKey.Field(err.Error()),
 				StatusCodeKey.Field(e.Status()),
 			)
-			writeError(ctx, w, e, h.spec.ContentType, h.spec.Name)
+			writeError(ctx, w, e, h.spec.Name)
 			return e.Status(), nil
 		}
 
@@ -201,7 +201,7 @@ func (h *Handler[In, Out]) Process(ctx context.Context, r *http.Request, w http.
 			HandlerNameKey.Field(h.spec.Name),
 			ErrorKey.Field(err.Error()),
 		)
-		writeError(ctx, w, ErrInternalServer, h.spec.ContentType, h.spec.Name)
+		writeError(ctx, w, ErrInternalServer, h.spec.Name)
 		return http.StatusInternalServerError, err
 	}
 
@@ -213,7 +213,7 @@ func (h *Handler[In, Out]) Process(ctx context.Context, r *http.Request, w http.
 					HandlerNameKey.Field(h.spec.Name),
 					ErrorKey.Field(err.Error()),
 				)
-				writeError(ctx, w, ErrInternalServer.WithCause(err), h.spec.ContentType, h.spec.Name)
+				writeError(ctx, w, ErrInternalServer.WithCause(err), h.spec.Name)
 				return http.StatusInternalServerError, err
 			}
 		}
@@ -227,7 +227,7 @@ func (h *Handler[In, Out]) Process(ctx context.Context, r *http.Request, w http.
 				HandlerNameKey.Field(h.spec.Name),
 				ErrorKey.Field("redirect URL is empty"),
 			)
-			writeError(ctx, w, ErrInternalServer.WithMessage("redirect URL is empty"), h.spec.ContentType, h.spec.Name)
+			writeError(ctx, w, ErrInternalServer.WithMessage("redirect URL is empty"), h.spec.Name)
 			return http.StatusInternalServerError, nil
 		}
 
@@ -271,7 +271,7 @@ func (h *Handler[In, Out]) Process(ctx context.Context, r *http.Request, w http.
 					HandlerNameKey.Field(h.spec.Name),
 					ErrorKey.Field(validErr.Error()),
 				)
-				writeError(ctx, w, ErrInternalServer.WithCause(fmt.Errorf("output validation failed: %w", validErr)), h.spec.ContentType, h.spec.Name)
+				writeError(ctx, w, ErrInternalServer.WithCause(fmt.Errorf("output validation failed: %w", validErr)), h.spec.Name)
 				return http.StatusInternalServerError, fmt.Errorf("output validation failed: %w", validErr)
 			}
 		}
@@ -284,7 +284,7 @@ func (h *Handler[In, Out]) Process(ctx context.Context, r *http.Request, w http.
 			HandlerNameKey.Field(h.spec.Name),
 			ErrorKey.Field(err.Error()),
 		)
-		writeError(ctx, w, ErrInternalServer.WithCause(err), h.spec.ContentType, h.spec.Name)
+		writeError(ctx, w, ErrInternalServer.WithCause(err), h.spec.Name)
 		return http.StatusInternalServerError, err
 	}
 
@@ -618,11 +618,12 @@ func (h *Handler[In, Out]) isErrorDeclared(err ErrorDefinition) bool {
 	return exists
 }
 
-// writeError writes a structured error response using the specified content type.
+// writeError writes a structured error response.
 // Error responses are always JSON-encoded regardless of handler codec, as error
-// schemas are defined in JSON format in OpenAPI.
-func writeError(ctx context.Context, w http.ResponseWriter, err ErrorDefinition, contentType, handlerName string) {
-	w.Header().Set("Content-Type", contentType)
+// schemas are defined in JSON format in OpenAPI — so the content type is
+// always JSON too, even when the handler uses a different codec.
+func writeError(ctx context.Context, w http.ResponseWriter, err ErrorDefinition, handlerName string) {
+	w.Header().Set("Content-Type", ContentTypeJSON)
 	w.WriteHeader(err.Status())
 
 	if encodeErr := json.NewEncoder(w).Encode(errorResponse{
@@ -638,7 +639,7 @@ func writeError(ctx context.Context, w http.ResponseWriter, err ErrorDefinition,
 }
 
 // writeValidationErrorResponse writes detailed validation errors using the standard error format.
-func writeValidationErrorResponse(ctx context.Context, w http.ResponseWriter, err error, contentType, handlerName string) {
+func writeValidationErrorResponse(ctx context.Context, w http.ResponseWriter, err error, handlerName string) {
 	// Try to extract check.Result field errors first.
 	result := &check.Result{}
 	if errors.As(err, &result) {
@@ -651,7 +652,7 @@ func writeValidationErrorResponse(ctx context.Context, w http.ResponseWriter, er
 					Message: fe.Message,
 				}
 			}
-			writeError(ctx, w, ErrValidationFailed.WithDetails(ValidationDetails{Fields: fields}), contentType, handlerName)
+			writeError(ctx, w, ErrValidationFailed.WithDetails(ValidationDetails{Fields: fields}), handlerName)
 			return
 		}
 	}
@@ -659,10 +660,10 @@ func writeValidationErrorResponse(ctx context.Context, w http.ResponseWriter, er
 	// Try legacy ValidationDetails for backward compatibility.
 	var details ValidationDetails
 	if errors.As(err, &details) {
-		writeError(ctx, w, ErrValidationFailed.WithDetails(details), contentType, handlerName)
+		writeError(ctx, w, ErrValidationFailed.WithDetails(details), handlerName)
 		return
 	}
 
 	// Fallback to generic validation error with message.
-	writeError(ctx, w, ErrValidationFailed.WithMessage(err.Error()), contentType, handlerName)
+	writeError(ctx, w, ErrValidationFailed.WithMessage(err.Error()), handlerName)
 }
