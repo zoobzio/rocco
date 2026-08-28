@@ -956,7 +956,11 @@ func TestStreamHandler_OutlivesWriteTimeout(t *testing.T) {
 	ts.Start()
 	defer ts.Close()
 
-	resp, err := http.Get(ts.URL + "/ticker")
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, ts.URL+"/ticker", nil)
+	if err != nil {
+		t.Fatalf("building request failed: %v", err)
+	}
+	resp, err := ts.Client().Do(req)
 	if err != nil {
 		t.Fatalf("request failed: %v", err)
 	}
