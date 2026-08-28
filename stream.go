@@ -134,9 +134,6 @@ type StreamHandler[In, Out any] struct {
 	// Validation flag (checked once at creation time).
 	inputValidatable bool // True if In implements Validatable.
 
-	// Maximum initial request body size in bytes (0 = unlimited, default: 10MB).
-	maxBodySize int64
-
 	// Middleware.
 	middleware []func(http.Handler) http.Handler
 }
@@ -172,10 +169,10 @@ func (h *StreamHandler[In, Out]) Process(ctx context.Context, r *http.Request, w
 
 	// Parse request body (for POST/PUT streams with initial payload).
 	var input In
-	if h.InputMeta.TypeName != noBodyTypeName && r.Body != nil {
+	if h.spec.Request.Kind != BodyNone && r.Body != nil {
 		// Limit body size if configured - use MaxBytesReader for proper 413 errors.
-		if h.maxBodySize > 0 {
-			r.Body = http.MaxBytesReader(w, r.Body, h.maxBodySize)
+		if h.spec.Request.MaxBytes > 0 {
+			r.Body = http.MaxBytesReader(w, r.Body, h.spec.Request.MaxBytes)
 		}
 
 		body, readErr := io.ReadAll(r.Body)
@@ -188,7 +185,7 @@ func (h *StreamHandler[In, Out]) Process(ctx context.Context, r *http.Request, w
 					ErrorKey.Field("payload too large"),
 				)
 				writeError(ctx, w, ErrPayloadTooLarge.WithDetails(PayloadTooLargeDetails{
-					MaxSize: h.maxBodySize,
+					MaxSize: h.spec.Request.MaxBytes,
 				}), h.spec.Name)
 				return http.StatusRequestEntityTooLarge, readErr
 			}
@@ -348,6 +345,15 @@ func NewStreamHandler[In, Out any](name string, method, path string, fn func(*Re
 	var zeroIn In
 	_, inputValidatable := any(zeroIn).(Validatable)
 
+	// Derive the request contract from the input type parameter.
+	request := RequestContract{
+		Kind:     BodyEncoded,
+		MaxBytes: 10 * 1024 * 1024, // Default to 10MB.
+	}
+	if inputMeta.TypeName == noBodyTypeName {
+		request.Kind = BodyNone
+	}
+
 	return &StreamHandler[In, Out]{
 		fn: fn,
 		spec: HandlerSpec{
@@ -360,20 +366,21 @@ func NewStreamHandler[In, Out any](name string, method, path string, fn func(*Re
 			InputTypeName:  inputMeta.TypeName,
 			OutputTypeFQDN: outputMeta.FQDN,
 			OutputTypeName: outputMeta.TypeName,
-			SuccessStatus:  http.StatusOK,
-			ErrorCodes:     []int{},
-			RequiresAuth:   false,
-			ScopeGroups:    [][]string{},
-			RoleGroups:     [][]string{},
-			UsageLimits:    []UsageLimit{},
-			Tags:           []string{},
-			IsStream:       true,
+			Request:        request,
+			Response: ResponseContract{
+				Kind:   BodyStream,
+				Status: http.StatusOK,
+			},
+			RequiresAuth: false,
+			ScopeGroups:  [][]string{},
+			RoleGroups:   [][]string{},
+			UsageLimits:  []UsageLimit{},
+			Tags:         []string{},
 		},
 		errorDefs:        make(map[string]ErrorDefinition),
 		InputMeta:        inputMeta,
 		OutputMeta:       outputMeta,
 		inputValidatable: inputValidatable,
-		maxBodySize:      10 * 1024 * 1024, // Default to 10MB.
 		middleware:       make([]func(http.Handler) http.Handler, 0),
 	}
 }
@@ -382,7 +389,7 @@ func NewStreamHandler[In, Out any](name string, method, path string, fn func(*Re
 // stream handler. Applies to the payload of POST/PUT streams. A value of 0
 // disables the limit.
 func (h *StreamHandler[In, Out]) WithMaxBodySize(size int64) *StreamHandler[In, Out] {
-	h.maxBodySize = size
+	h.spec.Request.MaxBytes = size
 	return h
 }
 
@@ -421,11 +428,6 @@ func (h *StreamHandler[In, Out]) WithQueryParams(params ...string) *StreamHandle
 func (h *StreamHandler[In, Out]) WithErrors(errs ...ErrorDefinition) *StreamHandler[In, Out] {
 	for _, err := range errs {
 		h.errorDefs[err.Code()] = err
-	}
-	// Rebuild ErrorCodes from deduplicated map
-	h.spec.ErrorCodes = make([]int, 0, len(h.errorDefs))
-	for _, err := range h.errorDefs {
-		h.spec.ErrorCodes = append(h.spec.ErrorCodes, err.Status())
 	}
 	return h
 }

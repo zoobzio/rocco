@@ -19,8 +19,7 @@ func TestHandlerSpec_Serialization(t *testing.T) {
 		QueryParams:    []string{"page", "limit"},
 		InputTypeName:  "CreateUserInput",
 		OutputTypeName: "UserOutput",
-		SuccessStatus:  201,
-		ErrorCodes:     []int{400, 422},
+		Response:       ResponseContract{Kind: BodyEncoded, Status: 201},
 		RequiresAuth:   true,
 		ScopeGroups:    [][]string{{"write:users"}},
 		RoleGroups:     [][]string{{"admin", "moderator"}},
@@ -47,8 +46,8 @@ func TestHandlerSpec_Serialization(t *testing.T) {
 	if decoded.Path != spec.Path {
 		t.Errorf("Path = %q, want %q", decoded.Path, spec.Path)
 	}
-	if decoded.SuccessStatus != spec.SuccessStatus {
-		t.Errorf("SuccessStatus = %d, want %d", decoded.SuccessStatus, spec.SuccessStatus)
+	if decoded.Response.Status != spec.Response.Status {
+		t.Errorf("SuccessStatus = %d, want %d", decoded.Response.Status, spec.Response.Status)
 	}
 	if decoded.RequiresAuth != spec.RequiresAuth {
 		t.Errorf("RequiresAuth = %v, want %v", decoded.RequiresAuth, spec.RequiresAuth)
@@ -60,7 +59,7 @@ func TestHandlerSpec_StreamFlag(t *testing.T) {
 		Name:     "event-stream",
 		Method:   "GET",
 		Path:     "/events",
-		IsStream: true,
+		Response: ResponseContract{Kind: BodyStream, Status: 200},
 	}
 
 	data, err := json.Marshal(spec) //nolint:staticcheck // Testing serializable fields only
@@ -73,8 +72,8 @@ func TestHandlerSpec_StreamFlag(t *testing.T) {
 		t.Fatalf("Unmarshal() error = %v", err)
 	}
 
-	if !decoded.IsStream {
-		t.Error("IsStream = false, want true")
+	if decoded.Response.Kind != BodyStream {
+		t.Error("Response.Kind != BodyStream after round-trip")
 	}
 }
 

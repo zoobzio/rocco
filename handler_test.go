@@ -91,8 +91,8 @@ func TestNewHandler(t *testing.T) {
 	if spec.Path != "/test" {
 		t.Errorf("expected path '/test', got %q", spec.Path)
 	}
-	if spec.SuccessStatus != 200 {
-		t.Errorf("expected default success status 200, got %d", spec.SuccessStatus)
+	if spec.Response.Status != 200 {
+		t.Errorf("expected default success status 200, got %d", spec.Response.Status)
 	}
 	if handler.InputMeta.TypeName != "testInput" {
 		t.Errorf("expected input type 'testInput', got %q", handler.InputMeta.TypeName)
@@ -130,8 +130,8 @@ func TestHandler_WithBuilderMethods(t *testing.T) {
 	if len(spec.Tags) != 2 {
 		t.Errorf("expected 2 tags, got %d", len(spec.Tags))
 	}
-	if spec.SuccessStatus != 201 {
-		t.Errorf("expected success status 201, got %d", spec.SuccessStatus)
+	if spec.Response.Status != 201 {
+		t.Errorf("expected success status 201, got %d", spec.Response.Status)
 	}
 	if len(spec.PathParams) != 1 {
 		t.Errorf("expected 1 path param, got %d", len(spec.PathParams))
@@ -139,8 +139,8 @@ func TestHandler_WithBuilderMethods(t *testing.T) {
 	if len(spec.QueryParams) != 2 {
 		t.Errorf("expected 2 query params, got %d", len(spec.QueryParams))
 	}
-	if len(spec.ErrorCodes) != 2 {
-		t.Errorf("expected 2 error codes, got %d", len(spec.ErrorCodes))
+	if len(handler.ErrorDefs()) != 2 {
+		t.Errorf("expected 2 error definitions, got %d", len(handler.ErrorDefs()))
 	}
 }
 
@@ -599,8 +599,8 @@ func TestHandler_WithMaxBodySize(t *testing.T) {
 		},
 	).WithMaxBodySize(1024)
 
-	if handler.maxBodySize != 1024 {
-		t.Errorf("expected maxBodySize 1024, got %d", handler.maxBodySize)
+	if handler.Spec().Request.MaxBytes != 1024 {
+		t.Errorf("expected Request.MaxBytes 1024, got %d", handler.Spec().Request.MaxBytes)
 	}
 }
 
@@ -1496,5 +1496,57 @@ func TestWriteError_AlwaysJSONContentType(t *testing.T) {
 	}
 	if resp.Code != "NOT_FOUND" {
 		t.Errorf("error code = %q, want NOT_FOUND", resp.Code)
+	}
+}
+
+// TestNewHandler_ContractDefaults verifies the request/response contracts
+// derived from the type parameters at construction.
+func TestNewHandler_ContractDefaults(t *testing.T) {
+	plain := NewHandler[testInput, testOutput]("plain", "POST", "/p",
+		func(_ *Request[testInput]) (testOutput, error) { return testOutput{}, nil })
+	spec := plain.Spec()
+	if spec.Request.Kind != BodyEncoded {
+		t.Errorf("Request.Kind = %q, want %q", spec.Request.Kind, BodyEncoded)
+	}
+	if spec.Request.MaxBytes != 10*1024*1024 {
+		t.Errorf("Request.MaxBytes = %d, want 10MB", spec.Request.MaxBytes)
+	}
+	if spec.Response.Kind != BodyEncoded || spec.Response.Status != 200 {
+		t.Errorf("Response = %+v, want encoded/200", spec.Response)
+	}
+
+	noBody := NewHandler[NoBody, testOutput]("nobody", "GET", "/n",
+		func(_ *Request[NoBody]) (testOutput, error) { return testOutput{}, nil })
+	if noBody.Spec().Request.Kind != BodyNone {
+		t.Errorf("NoBody input: Request.Kind = %q, want %q", noBody.Spec().Request.Kind, BodyNone)
+	}
+
+	redirect := NewHandler[NoBody, Redirect]("redir", "GET", "/r",
+		func(_ *Request[NoBody]) (Redirect, error) { return Redirect{URL: "/x"}, nil })
+	rc := redirect.Spec().Response
+	if rc.Kind != BodyNone || !rc.Redirect || rc.Status != DefaultRedirectStatus {
+		t.Errorf("Redirect output: Response = %+v, want none/redirect/302", rc)
+	}
+}
+
+// TestHandler_Process_RedirectValueStatusOverride verifies a nonzero
+// Redirect.Status on the returned value overrides the declared status.
+func TestHandler_Process_RedirectValueStatusOverride(t *testing.T) {
+	handler := NewHandler[NoBody, Redirect]("redir", "GET", "/r",
+		func(_ *Request[NoBody]) (Redirect, error) {
+			return Redirect{URL: "/x", Status: http.StatusSeeOther}, nil
+		})
+
+	req := httptest.NewRequest("GET", "/r", nil)
+	w := httptest.NewRecorder()
+	status, err := handler.Process(context.Background(), req, w)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if status != http.StatusSeeOther || w.Code != http.StatusSeeOther {
+		t.Errorf("status = %d/%d, want 303", status, w.Code)
+	}
+	if loc := w.Header().Get("Location"); loc != "/x" {
+		t.Errorf("Location = %q, want /x", loc)
 	}
 }
