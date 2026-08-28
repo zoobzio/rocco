@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -974,5 +975,55 @@ func TestStreamHandler_OutlivesWriteTimeout(t *testing.T) {
 	got := strings.Count(string(body), "data:")
 	if got != events {
 		t.Errorf("expected %d events past WriteTimeout, got %d\nbody: %q", events, got, body)
+	}
+}
+
+// TestNewStreamHandler_SetsFQDNs verifies stream handler specs carry the
+// fully-qualified type names needed for sentinel lookups in docs generation.
+func TestNewStreamHandler_SetsFQDNs(t *testing.T) {
+	handler := NewStreamHandler[streamInput, streamEvent](
+		"fqdn-stream", "POST", "/events",
+		func(_ *Request[streamInput], _ Stream[streamEvent]) error { return nil },
+	)
+
+	spec := handler.Spec()
+	if spec.InputTypeFQDN == "" {
+		t.Error("InputTypeFQDN is empty")
+	}
+	if spec.OutputTypeFQDN == "" {
+		t.Error("OutputTypeFQDN is empty")
+	}
+	if !strings.HasSuffix(spec.InputTypeFQDN, spec.InputTypeName) {
+		t.Errorf("InputTypeFQDN %q does not end with type name %q", spec.InputTypeFQDN, spec.InputTypeName)
+	}
+}
+
+// TestStreamHandler_Process_WrappedDisconnectError verifies that a wrapped
+// client-disconnect error from a handler is treated as a normal disconnect,
+// not an unexpected error. Guards the errors.Is matching (previously a
+// fragile string comparison).
+func TestStreamHandler_Process_WrappedDisconnectError(t *testing.T) {
+	handler := NewStreamHandler[NoBody, streamEvent](
+		"wrap-disconnect", "GET", "/events",
+		func(_ *Request[NoBody], stream Stream[streamEvent]) error {
+			if err := stream.Send(streamEvent{Message: "x"}); err != nil {
+				return fmt.Errorf("send failed: %w", err)
+			}
+			return nil
+		},
+	)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // Client already gone before the first send.
+
+	req := httptest.NewRequest("GET", "/events", nil)
+	w := newFlushRecorder()
+
+	status, err := handler.Process(ctx, req, w)
+	if err != nil {
+		t.Fatalf("wrapped disconnect should not surface as error, got: %v", err)
+	}
+	if status != 200 {
+		t.Errorf("expected status 200, got %d", status)
 	}
 }

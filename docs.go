@@ -610,35 +610,9 @@ func isHandlerAccessible(handler Endpoint, identity Identity) bool {
 		return true
 	}
 
-	// Check scope requirements (AND across groups, OR within group)
-	for _, scopeGroup := range handlerSpec.ScopeGroups {
-		hasAnyScope := false
-		for _, scope := range scopeGroup {
-			if identity.HasScope(scope) {
-				hasAnyScope = true
-				break
-			}
-		}
-		if !hasAnyScope {
-			return false // Missing required scope group
-		}
-	}
-
-	// Check role requirements (AND across groups, OR within group)
-	for _, roleGroup := range handlerSpec.RoleGroups {
-		hasAnyRole := false
-		for _, role := range roleGroup {
-			if identity.HasRole(role) {
-				hasAnyRole = true
-				break
-			}
-		}
-		if !hasAnyRole {
-			return false // Missing required role group
-		}
-	}
-
-	return true
+	// Same semantics as the authorization middleware: OR within group, AND across groups.
+	_, _, ok := satisfiesRequirements(identity, handlerSpec.ScopeGroups, handlerSpec.RoleGroups)
+	return ok
 }
 
 // GenerateOpenAPI creates an OpenAPI specification from registered handlers.

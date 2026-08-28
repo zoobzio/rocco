@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"testing"
 )
 
@@ -838,6 +839,45 @@ func TestUsageLimit_DynamicThreshold(t *testing.T) {
 
 			if w.Code != tt.expectStatus {
 				t.Errorf("expected status %d, got %d", tt.expectStatus, w.Code)
+			}
+		})
+	}
+}
+
+// TestSatisfiesRequirements covers the shared authorization check used by both
+// the engine middleware and OpenAPI handler filtering.
+func TestSatisfiesRequirements(t *testing.T) {
+	id := &testIdentity{scopes: []string{"read", "write"}, roles: []string{"admin"}}
+
+	tests := []struct {
+		name            string
+		scopeGroups     [][]string
+		roleGroups      [][]string
+		wantOK          bool
+		wantFailedScope []string
+		wantFailedRole  []string
+	}{
+		{name: "no requirements", wantOK: true},
+		{name: "scope satisfied by one of group", scopeGroups: [][]string{{"missing", "read"}}, wantOK: true},
+		{name: "all scope groups satisfied", scopeGroups: [][]string{{"read"}, {"write"}}, wantOK: true},
+		{name: "scope group fails", scopeGroups: [][]string{{"read"}, {"delete"}}, wantOK: false, wantFailedScope: []string{"delete"}},
+		{name: "role satisfied", roleGroups: [][]string{{"admin", "moderator"}}, wantOK: true},
+		{name: "role group fails", roleGroups: [][]string{{"owner"}}, wantOK: false, wantFailedRole: []string{"owner"}},
+		{name: "scopes checked before roles", scopeGroups: [][]string{{"delete"}}, roleGroups: [][]string{{"owner"}}, wantOK: false, wantFailedScope: []string{"delete"}},
+		{name: "scopes pass then role fails", scopeGroups: [][]string{{"read"}}, roleGroups: [][]string{{"owner"}}, wantOK: false, wantFailedRole: []string{"owner"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			failedScopes, failedRoles, ok := satisfiesRequirements(id, tt.scopeGroups, tt.roleGroups)
+			if ok != tt.wantOK {
+				t.Fatalf("ok = %v, want %v", ok, tt.wantOK)
+			}
+			if !reflect.DeepEqual(failedScopes, tt.wantFailedScope) {
+				t.Errorf("failedScopes = %v, want %v", failedScopes, tt.wantFailedScope)
+			}
+			if !reflect.DeepEqual(failedRoles, tt.wantFailedRole) {
+				t.Errorf("failedRoles = %v, want %v", failedRoles, tt.wantFailedRole)
 			}
 		})
 	}

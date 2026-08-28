@@ -14,6 +14,10 @@ import (
 	"github.com/zoobz-io/sentinel"
 )
 
+// errClientDisconnected is returned by stream sends after the client has
+// disconnected. Handlers can match it with errors.Is.
+var errClientDisconnected = errors.New("client disconnected")
+
 // Stream provides a typed interface for sending SSE events.
 type Stream[T any] interface {
 	// Send sends a data-only event.
@@ -53,7 +57,7 @@ func (s *sseStream[T]) SendEvent(event string, data T) error {
 	select {
 	case <-s.done:
 		s.closed = true
-		return errors.New("client disconnected")
+		return errClientDisconnected
 	default:
 	}
 
@@ -93,7 +97,7 @@ func (s *sseStream[T]) SendComment(comment string) error {
 	select {
 	case <-s.done:
 		s.closed = true
-		return errors.New("client disconnected")
+		return errClientDisconnected
 	default:
 	}
 
@@ -151,7 +155,7 @@ func (h *StreamHandler[In, Out]) Process(ctx context.Context, r *http.Request, w
 			HandlerNameKey.Field(h.spec.Name),
 			ErrorKey.Field("streaming not supported"),
 		)
-		writeError(ctx, w, ErrInternalServer.WithMessage("streaming not supported"), defaultCodec.ContentType(), h.spec.Name)
+		writeError(ctx, w, ErrInternalServer.WithMessage("streaming not supported"), h.spec.Name)
 		return http.StatusInternalServerError, errors.New("streaming not supported")
 	}
 
@@ -162,7 +166,7 @@ func (h *StreamHandler[In, Out]) Process(ctx context.Context, r *http.Request, w
 			HandlerNameKey.Field(h.spec.Name),
 			ErrorKey.Field(err.Error()),
 		)
-		writeError(ctx, w, ErrUnprocessableEntity.WithMessage("invalid parameters").WithCause(err), defaultCodec.ContentType(), h.spec.Name)
+		writeError(ctx, w, ErrUnprocessableEntity.WithMessage("invalid parameters").WithCause(err), h.spec.Name)
 		return http.StatusUnprocessableEntity, err
 	}
 
@@ -185,14 +189,14 @@ func (h *StreamHandler[In, Out]) Process(ctx context.Context, r *http.Request, w
 				)
 				writeError(ctx, w, ErrPayloadTooLarge.WithDetails(PayloadTooLargeDetails{
 					MaxSize: h.maxBodySize,
-				}), defaultCodec.ContentType(), h.spec.Name)
+				}), h.spec.Name)
 				return http.StatusRequestEntityTooLarge, readErr
 			}
 			capitan.Error(ctx, RequestBodyReadError,
 				HandlerNameKey.Field(h.spec.Name),
 				ErrorKey.Field(readErr.Error()),
 			)
-			writeError(ctx, w, ErrBadRequest.WithMessage("failed to read request body").WithCause(readErr), defaultCodec.ContentType(), h.spec.Name)
+			writeError(ctx, w, ErrBadRequest.WithMessage("failed to read request body").WithCause(readErr), h.spec.Name)
 			return http.StatusBadRequest, readErr
 		}
 		if err := r.Body.Close(); err != nil {
@@ -208,7 +212,7 @@ func (h *StreamHandler[In, Out]) Process(ctx context.Context, r *http.Request, w
 					HandlerNameKey.Field(h.spec.Name),
 					ErrorKey.Field(unmarshalErr.Error()),
 				)
-				writeError(ctx, w, ErrUnprocessableEntity.WithMessage("invalid request body").WithCause(unmarshalErr), defaultCodec.ContentType(), h.spec.Name)
+				writeError(ctx, w, ErrUnprocessableEntity.WithMessage("invalid request body").WithCause(unmarshalErr), h.spec.Name)
 				return http.StatusUnprocessableEntity, unmarshalErr
 			}
 
@@ -220,7 +224,7 @@ func (h *StreamHandler[In, Out]) Process(ctx context.Context, r *http.Request, w
 							HandlerNameKey.Field(h.spec.Name),
 							ErrorKey.Field(inputErr.Error()),
 						)
-						writeValidationErrorResponse(ctx, w, inputErr, defaultCodec.ContentType(), h.spec.Name)
+						writeValidationErrorResponse(ctx, w, inputErr, h.spec.Name)
 						return http.StatusUnprocessableEntity, inputErr
 					}
 				}
@@ -288,7 +292,7 @@ func (h *StreamHandler[In, Out]) Process(ctx context.Context, r *http.Request, w
 		}
 
 		// Check for client disconnect
-		if errors.Is(err, context.Canceled) || err.Error() == "client disconnected" {
+		if errors.Is(err, context.Canceled) || errors.Is(err, errClientDisconnected) {
 			capitan.Info(ctx, StreamClientDisconnected,
 				HandlerNameKey.Field(h.spec.Name),
 			)
@@ -352,7 +356,9 @@ func NewStreamHandler[In, Out any](name string, method, path string, fn func(*Re
 			Path:           path,
 			PathParams:     []string{},
 			QueryParams:    []string{},
+			InputTypeFQDN:  inputMeta.FQDN,
 			InputTypeName:  inputMeta.TypeName,
+			OutputTypeFQDN: outputMeta.FQDN,
 			OutputTypeName: outputMeta.TypeName,
 			SuccessStatus:  http.StatusOK,
 			ErrorCodes:     []int{},
