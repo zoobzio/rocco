@@ -984,8 +984,8 @@ func TestHandler_DefaultCodec(t *testing.T) {
 	)
 
 	spec := handler.Spec()
-	if spec.ContentType != "application/json" {
-		t.Errorf("expected default content type 'application/json', got %q", spec.ContentType)
+	if primaryMediaType(spec.Response.MediaTypes) != "application/json" {
+		t.Errorf("expected default content type 'application/json', got %q", primaryMediaType(spec.Response.MediaTypes))
 	}
 }
 
@@ -1002,8 +1002,8 @@ func TestHandler_WithCodec(t *testing.T) {
 	).WithCodec(xmlCodec)
 
 	spec := handler.Spec()
-	if spec.ContentType != "application/xml" {
-		t.Errorf("expected content type 'application/xml', got %q", spec.ContentType)
+	if primaryMediaType(spec.Response.MediaTypes) != "application/xml" {
+		t.Errorf("expected content type 'application/xml', got %q", primaryMediaType(spec.Response.MediaTypes))
 	}
 }
 
@@ -1048,8 +1048,8 @@ func TestHandler_ApplyDefaultCodec(t *testing.T) {
 	handler.applyDefaultCodec(xmlCodec)
 
 	spec := handler.Spec()
-	if spec.ContentType != "application/xml" {
-		t.Errorf("expected content type 'application/xml', got %q", spec.ContentType)
+	if primaryMediaType(spec.Response.MediaTypes) != "application/xml" {
+		t.Errorf("expected content type 'application/xml', got %q", primaryMediaType(spec.Response.MediaTypes))
 	}
 }
 
@@ -1070,8 +1070,8 @@ func TestHandler_ApplyDefaultCodec_DoesNotOverrideExplicit(t *testing.T) {
 	handler.applyDefaultCodec(yamlCodec)
 
 	spec := handler.Spec()
-	if spec.ContentType != "application/xml" {
-		t.Errorf("expected content type 'application/xml' (explicit), got %q", spec.ContentType)
+	if primaryMediaType(spec.Response.MediaTypes) != "application/xml" {
+		t.Errorf("expected content type 'application/xml' (explicit), got %q", primaryMediaType(spec.Response.MediaTypes))
 	}
 }
 
@@ -1514,11 +1514,20 @@ func TestNewHandler_ContractDefaults(t *testing.T) {
 	if spec.Response.Kind != BodyEncoded || spec.Response.Status != 200 {
 		t.Errorf("Response = %+v, want encoded/200", spec.Response)
 	}
+	if primaryMediaType(spec.Request.MediaTypes) != ContentTypeJSON {
+		t.Errorf("Request.MediaTypes = %v, want default JSON", spec.Request.MediaTypes)
+	}
+	if primaryMediaType(spec.Response.MediaTypes) != ContentTypeJSON {
+		t.Errorf("Response.MediaTypes = %v, want default JSON", spec.Response.MediaTypes)
+	}
 
 	noBody := NewHandler[NoBody, testOutput]("nobody", "GET", "/n",
 		func(_ *Request[NoBody]) (testOutput, error) { return testOutput{}, nil })
 	if noBody.Spec().Request.Kind != BodyNone {
 		t.Errorf("NoBody input: Request.Kind = %q, want %q", noBody.Spec().Request.Kind, BodyNone)
+	}
+	if noBody.Spec().Request.MediaTypes != nil {
+		t.Errorf("NoBody input: Request.MediaTypes = %v, want nil", noBody.Spec().Request.MediaTypes)
 	}
 
 	redirect := NewHandler[NoBody, Redirect]("redir", "GET", "/r",
@@ -1526,6 +1535,9 @@ func TestNewHandler_ContractDefaults(t *testing.T) {
 	rc := redirect.Spec().Response
 	if rc.Kind != BodyNone || !rc.Redirect || rc.Status != DefaultRedirectStatus {
 		t.Errorf("Redirect output: Response = %+v, want none/redirect/302", rc)
+	}
+	if rc.MediaTypes != nil {
+		t.Errorf("Redirect output: Response.MediaTypes = %v, want nil", rc.MediaTypes)
 	}
 }
 

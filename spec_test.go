@@ -149,12 +149,20 @@ func TestDefaultEngineSpec(t *testing.T) {
 	}
 }
 
-func TestHandlerSpec_ContentType(t *testing.T) {
+func TestHandlerSpec_MediaTypes(t *testing.T) {
 	spec := HandlerSpec{
-		Name:        "upload",
-		Method:      "POST",
-		Path:        "/upload",
-		ContentType: "multipart/form-data",
+		Name:   "upload",
+		Method: "POST",
+		Path:   "/upload",
+		Request: RequestContract{
+			Kind:       BodyEncoded,
+			MediaTypes: []string{"multipart/form-data"},
+		},
+		Response: ResponseContract{
+			Kind:       BodyEncoded,
+			Status:     200,
+			MediaTypes: []string{"application/json"},
+		},
 	}
 
 	data, err := json.Marshal(spec) //nolint:staticcheck // Testing serializable fields only
@@ -167,8 +175,20 @@ func TestHandlerSpec_ContentType(t *testing.T) {
 		t.Fatalf("Unmarshal() error = %v", err)
 	}
 
-	if decoded.ContentType != "multipart/form-data" {
-		t.Errorf("ContentType = %q, want %q", decoded.ContentType, "multipart/form-data")
+	if got := primaryMediaType(decoded.Request.MediaTypes); got != "multipart/form-data" {
+		t.Errorf("Request media type = %q, want %q", got, "multipart/form-data")
+	}
+	if got := primaryMediaType(decoded.Response.MediaTypes); got != "application/json" {
+		t.Errorf("Response media type = %q, want %q", got, "application/json")
+	}
+}
+
+func TestPrimaryMediaType_EmptyFallsBackToJSON(t *testing.T) {
+	if got := primaryMediaType(nil); got != ContentTypeJSON {
+		t.Errorf("primaryMediaType(nil) = %q, want %q", got, ContentTypeJSON)
+	}
+	if got := primaryMediaType([]string{"image/png", "application/pdf"}); got != "image/png" {
+		t.Errorf("primaryMediaType = %q, want first entry %q", got, "image/png")
 	}
 }
 

@@ -998,6 +998,30 @@ func TestNewStreamHandler_SetsFQDNs(t *testing.T) {
 	}
 }
 
+// TestNewStreamHandler_MediaTypes verifies the stream contract declares its
+// fixed wire formats: SSE out, JSON in.
+func TestNewStreamHandler_MediaTypes(t *testing.T) {
+	handler := NewStreamHandler[streamInput, streamEvent](
+		"mt-stream", "POST", "/events",
+		func(_ *Request[streamInput], _ Stream[streamEvent]) error { return nil },
+	)
+	spec := handler.Spec()
+	if got := primaryMediaType(spec.Response.MediaTypes); got != ContentTypeEventStream {
+		t.Errorf("Response media type = %q, want %q", got, ContentTypeEventStream)
+	}
+	if got := primaryMediaType(spec.Request.MediaTypes); got != ContentTypeJSON {
+		t.Errorf("Request media type = %q, want %q", got, ContentTypeJSON)
+	}
+
+	noBody := NewStreamHandler[NoBody, streamEvent](
+		"mt-stream-nobody", "GET", "/events2",
+		func(_ *Request[NoBody], _ Stream[streamEvent]) error { return nil },
+	)
+	if noBody.Spec().Request.MediaTypes != nil {
+		t.Errorf("NoBody stream: Request.MediaTypes = %v, want nil", noBody.Spec().Request.MediaTypes)
+	}
+}
+
 // TestStreamHandler_Process_WrappedDisconnectError verifies that a wrapped
 // client-disconnect error from a handler is treated as a normal disconnect,
 // not an unexpected error. Guards the errors.Is matching (previously a

@@ -26,6 +26,12 @@ var (
 	// HandlerRegistered is emitted when a handler is registered with the engine.
 	// Fields: HandlerNameKey, MethodKey, PathKey.
 	HandlerRegistered = capitan.NewSignal("http.handler.registered", "HTTP handler registered with engine for specific route")
+
+	// HandlerCodecMismatch is emitted when the engine's codec does not apply to
+	// a registered handler — e.g. a non-JSON engine codec with a stream handler,
+	// whose wire format is fixed to SSE frames carrying JSON.
+	// Fields: HandlerNameKey, ErrorKey.
+	HandlerCodecMismatch = capitan.NewSignal("http.handler.codec.mismatch", "Engine codec does not apply to this handler's fixed wire format")
 )
 
 // Request lifecycle signals.
