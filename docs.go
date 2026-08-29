@@ -666,29 +666,27 @@ func (e *Engine) GenerateOpenAPI(identity Identity) *openapi.OpenAPI {
 		}
 	}
 
-	// Generate typed error response schemas from collected error definitions
+	// Generate typed error response schemas from collected error definitions.
+	// The base shape is scanned from the errorResponse struct — the same
+	// declaration writeError encodes — then specialized per error code.
+	errRespMeta := sentinel.Scan[errorResponse]()
 	for code, errDef := range errorDefs {
 		detailsMeta := errDef.DetailsMeta()
 		schemaName := "Err" + errorCodeToSchemaName(code)
 
-		// Build properties for the error response
-		properties := map[string]*openapi.Schema{
-			"code":    {Type: openapi.NewSchemaType("string"), Const: code, Description: "Machine-readable error code"},
-			"message": {Type: openapi.NewSchemaType("string"), Description: "Human-readable error message"},
-		}
+		schema := metadataToSchema(errRespMeta)
+		schema.Properties["code"].Const = code
 
-		// Inline details fields directly on the error schema
+		// Inline details fields directly on the error schema. The scanned
+		// "details" field is typed `any`, which has no useful schema — replace
+		// it with the concrete details type, or drop it when there is none.
 		if detailsMeta.TypeName != "" && detailsMeta.TypeName != "NoDetails" {
-			detailsSchema := metadataToSchema(detailsMeta)
-			properties["details"] = detailsSchema
+			schema.Properties["details"] = metadataToSchema(detailsMeta)
+		} else {
+			delete(schema.Properties, "details")
 		}
 
-		// Create the typed error response schema
-		spec.Components.Schemas[schemaName] = &openapi.Schema{
-			Type:       openapi.NewSchemaType("object"),
-			Properties: properties,
-			Required:   []string{"code", "message"},
-		}
+		spec.Components.Schemas[schemaName] = schema
 	}
 
 	// Track unique schemas to add to components

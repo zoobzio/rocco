@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"sync"
 	"time"
@@ -167,66 +166,11 @@ func (h *StreamHandler[In, Out]) Process(ctx context.Context, r *http.Request, w
 		return http.StatusUnprocessableEntity, err
 	}
 
-	// Parse request body (for POST/PUT streams with initial payload).
-	var input In
-	if h.spec.Request.Kind != BodyNone && r.Body != nil {
-		// Limit body size if configured - use MaxBytesReader for proper 413 errors.
-		if h.spec.Request.MaxBytes > 0 {
-			r.Body = http.MaxBytesReader(w, r.Body, h.spec.Request.MaxBytes)
-		}
-
-		body, readErr := io.ReadAll(r.Body)
-		if readErr != nil {
-			// Check if this is a max bytes exceeded error.
-			var maxBytesErr *http.MaxBytesError
-			if errors.As(readErr, &maxBytesErr) {
-				capitan.Warn(ctx, RequestBodyReadError,
-					HandlerNameKey.Field(h.spec.Name),
-					ErrorKey.Field("payload too large"),
-				)
-				writeError(ctx, w, ErrPayloadTooLarge.WithDetails(PayloadTooLargeDetails{
-					MaxSize: h.spec.Request.MaxBytes,
-				}), h.spec.Name)
-				return http.StatusRequestEntityTooLarge, readErr
-			}
-			capitan.Error(ctx, RequestBodyReadError,
-				HandlerNameKey.Field(h.spec.Name),
-				ErrorKey.Field(readErr.Error()),
-			)
-			writeError(ctx, w, ErrBadRequest.WithMessage("failed to read request body").WithCause(readErr), h.spec.Name)
-			return http.StatusBadRequest, readErr
-		}
-		if err := r.Body.Close(); err != nil {
-			capitan.Warn(ctx, RequestBodyCloseError,
-				HandlerNameKey.Field(h.spec.Name),
-				ErrorKey.Field(err.Error()),
-			)
-		}
-
-		if len(body) > 0 {
-			if unmarshalErr := json.Unmarshal(body, &input); unmarshalErr != nil {
-				capitan.Error(ctx, RequestBodyParseError,
-					HandlerNameKey.Field(h.spec.Name),
-					ErrorKey.Field(unmarshalErr.Error()),
-				)
-				writeError(ctx, w, ErrUnprocessableEntity.WithMessage("invalid request body").WithCause(unmarshalErr), h.spec.Name)
-				return http.StatusUnprocessableEntity, unmarshalErr
-			}
-
-			// Validate input if type implements Validatable.
-			if h.inputValidatable {
-				if v, ok := any(input).(Validatable); ok {
-					if inputErr := v.Validate(); inputErr != nil {
-						capitan.Warn(ctx, RequestValidationInputFailed,
-							HandlerNameKey.Field(h.spec.Name),
-							ErrorKey.Field(inputErr.Error()),
-						)
-						writeValidationErrorResponse(ctx, w, inputErr, h.spec.Name)
-						return http.StatusUnprocessableEntity, inputErr
-					}
-				}
-			}
-		}
+	// Parse request body (for POST/PUT streams with initial payload). Streams
+	// are SSE and therefore JSON on the wire, so the decoder is fixed.
+	input, status, err := decodeRequestBody[In](ctx, r, w, h.spec.Request, json.Unmarshal, h.inputValidatable, h.spec.Name)
+	if err != nil {
+		return status, err
 	}
 
 	// Extract identity from context if present
