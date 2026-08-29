@@ -212,6 +212,42 @@ func (h *Handler[In, Out]) Process(ctx context.Context, r *http.Request, w http.
 
 		return status, nil
 
+	case BodyRaw:
+		// BodyRaw is only set by NewHandler when Out is Blob.
+		//nolint:errcheck // The assertion cannot fail: BodyRaw ⟺ Out == Blob.
+		blob, _ := any(output).(Blob)
+
+		// The value may override the declared status and content type.
+		rawStatus := blob.Status
+		if rawStatus == 0 {
+			rawStatus = h.spec.Response.Status
+		}
+		contentType := blob.ContentType
+		if contentType == "" {
+			contentType = primaryMediaType(h.spec.Response.MediaTypes)
+		}
+
+		// Write custom response headers but NOT Content-Type — the blob owns it.
+		for key, value := range h.responseHeaders {
+			if key != "Content-Type" {
+				w.Header().Set(key, value)
+			}
+		}
+		w.Header().Set("Content-Type", contentType)
+		w.WriteHeader(rawStatus)
+		if _, err := w.Write(blob.Data); err != nil {
+			capitan.Warn(ctx, ResponseWriteError,
+				HandlerNameKey.Field(h.spec.Name),
+				ErrorKey.Field(err.Error()),
+			)
+		}
+
+		capitan.Info(ctx, HandlerSuccess,
+			HandlerNameKey.Field(h.spec.Name),
+			StatusCodeKey.Field(rawStatus),
+		)
+		return rawStatus, nil
+
 	default: // BodyEncoded
 		// Validate output (opt-in, disabled by default).
 		if h.validateOutput && h.outputValidatable {
@@ -298,6 +334,10 @@ func NewHandler[In, Out any](name string, method, path string, fn func(*Request[
 		request.Kind = BodyNone
 		request.MediaTypes = nil
 	}
+	if _, isRawBody := any(zeroIn).(RawBody); isRawBody {
+		request.Kind = BodyRaw
+		request.MediaTypes = []string{ContentTypeOctetStream}
+	}
 
 	response := ResponseContract{
 		Kind:       BodyEncoded,
@@ -309,6 +349,13 @@ func NewHandler[In, Out any](name string, method, path string, fn func(*Request[
 			Kind:     BodyNone,
 			Status:   DefaultRedirectStatus,
 			Redirect: true,
+		}
+	}
+	if _, isBlob := any(zeroOut).(Blob); isBlob {
+		response = ResponseContract{
+			Kind:       BodyRaw,
+			Status:     http.StatusOK,
+			MediaTypes: []string{ContentTypeOctetStream},
 		}
 	}
 
@@ -449,6 +496,24 @@ func (h *Handler[In, Out]) WithPathParams(params ...string) *Handler[In, Out] {
 // WithQueryParams specifies required query parameters.
 func (h *Handler[In, Out]) WithQueryParams(params ...string) *Handler[In, Out] {
 	h.spec.QueryParams = params
+	return h
+}
+
+// WithMediaTypes declares the media types a raw handler consumes or produces.
+// It applies to contracts with Kind BodyRaw (RawBody input, Blob output) and
+// is what the OpenAPI spec documents; encoded contracts take their media type
+// from the codec and are not affected. The first entry is the default
+// Content-Type when a returned Blob does not set one.
+func (h *Handler[In, Out]) WithMediaTypes(mediaTypes ...string) *Handler[In, Out] {
+	if len(mediaTypes) == 0 {
+		return h
+	}
+	if h.spec.Request.Kind == BodyRaw {
+		h.spec.Request.MediaTypes = mediaTypes
+	}
+	if h.spec.Response.Kind == BodyRaw {
+		h.spec.Response.MediaTypes = mediaTypes
+	}
 	return h
 }
 

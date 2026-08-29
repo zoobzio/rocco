@@ -1562,3 +1562,156 @@ func TestHandler_Process_RedirectValueStatusOverride(t *testing.T) {
 		t.Errorf("Location = %q, want /x", loc)
 	}
 }
+
+// TestNewHandler_RawContracts verifies BodyRaw derivation from the RawBody
+// and Blob marker types, and WithMediaTypes behavior.
+func TestNewHandler_RawContracts(t *testing.T) {
+	raw := NewHandler[RawBody, Blob]("raw", "POST", "/raw",
+		func(_ *Request[RawBody]) (Blob, error) { return Blob{}, nil })
+	spec := raw.Spec()
+	if spec.Request.Kind != BodyRaw {
+		t.Errorf("Request.Kind = %q, want %q", spec.Request.Kind, BodyRaw)
+	}
+	if primaryMediaType(spec.Request.MediaTypes) != ContentTypeOctetStream {
+		t.Errorf("Request.MediaTypes = %v, want default octet-stream", spec.Request.MediaTypes)
+	}
+	if spec.Response.Kind != BodyRaw || spec.Response.Status != 200 {
+		t.Errorf("Response = %+v, want raw/200", spec.Response)
+	}
+	if primaryMediaType(spec.Response.MediaTypes) != ContentTypeOctetStream {
+		t.Errorf("Response.MediaTypes = %v, want default octet-stream", spec.Response.MediaTypes)
+	}
+
+	raw.WithMediaTypes("image/png", "application/pdf")
+	spec = raw.Spec()
+	if len(spec.Request.MediaTypes) != 2 || spec.Request.MediaTypes[0] != "image/png" {
+		t.Errorf("Request.MediaTypes after WithMediaTypes = %v", spec.Request.MediaTypes)
+	}
+	if len(spec.Response.MediaTypes) != 2 || spec.Response.MediaTypes[0] != "image/png" {
+		t.Errorf("Response.MediaTypes after WithMediaTypes = %v", spec.Response.MediaTypes)
+	}
+
+	// An empty call is a no-op.
+	raw.WithMediaTypes()
+	if got := raw.Spec().Request.MediaTypes; len(got) != 2 {
+		t.Errorf("empty WithMediaTypes changed contract: %v", got)
+	}
+
+	// WithMediaTypes must not touch encoded contracts — the codec owns them.
+	encoded := NewHandler[testInput, testOutput]("enc", "POST", "/enc",
+		func(_ *Request[testInput]) (testOutput, error) { return testOutput{}, nil })
+	encoded.WithMediaTypes("image/png")
+	if got := primaryMediaType(encoded.Spec().Response.MediaTypes); got != ContentTypeJSON {
+		t.Errorf("encoded Response media type = %q, want untouched JSON", got)
+	}
+}
+
+// TestHandler_Process_BlobResponse verifies the raw write path: bytes as-is,
+// per-response content type, and the status/content-type fallback chain.
+func TestHandler_Process_BlobResponse(t *testing.T) {
+	payload := []byte{0x89, 0x50, 0x4E, 0x47, 0x00}
+	handler := NewHandler[NoBody, Blob]("blob", "GET", "/b",
+		func(_ *Request[NoBody]) (Blob, error) {
+			return Blob{ContentType: "image/png", Data: payload}, nil
+		}).WithMediaTypes("image/png")
+
+	req := httptest.NewRequest("GET", "/b", nil)
+	w := httptest.NewRecorder()
+	status, err := handler.Process(context.Background(), req, w)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if status != http.StatusOK || w.Code != http.StatusOK {
+		t.Errorf("status = %d/%d, want 200", status, w.Code)
+	}
+	if ct := w.Header().Get("Content-Type"); ct != "image/png" {
+		t.Errorf("Content-Type = %q, want image/png", ct)
+	}
+	if !bytes.Equal(w.Body.Bytes(), payload) {
+		t.Errorf("body = %v, want raw payload %v", w.Body.Bytes(), payload)
+	}
+}
+
+// TestHandler_Process_BlobFallbacks verifies zero-value Blob fields fall back
+// to the declared contract: first media type and handler success status.
+func TestHandler_Process_BlobFallbacks(t *testing.T) {
+	handler := NewHandler[NoBody, Blob]("blob-fb", "GET", "/bf",
+		func(_ *Request[NoBody]) (Blob, error) {
+			return Blob{Data: []byte("x")}, nil
+		}).WithMediaTypes("application/pdf").WithSuccessStatus(http.StatusCreated)
+
+	req := httptest.NewRequest("GET", "/bf", nil)
+	w := httptest.NewRecorder()
+	status, err := handler.Process(context.Background(), req, w)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if status != http.StatusCreated {
+		t.Errorf("status = %d, want declared 201", status)
+	}
+	if ct := w.Header().Get("Content-Type"); ct != "application/pdf" {
+		t.Errorf("Content-Type = %q, want declared application/pdf", ct)
+	}
+
+	// A nonzero Blob.Status overrides the declared status.
+	override := NewHandler[NoBody, Blob]("blob-ov", "GET", "/bo",
+		func(_ *Request[NoBody]) (Blob, error) {
+			return Blob{Data: []byte("x"), Status: http.StatusAccepted}, nil
+		})
+	w = httptest.NewRecorder()
+	status, err = override.Process(context.Background(), httptest.NewRequest("GET", "/bo", nil), w)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if status != http.StatusAccepted {
+		t.Errorf("status = %d, want value override 202", status)
+	}
+}
+
+// TestHandler_Process_RawBodyInput verifies raw request bodies reach the
+// handler undecoded, with the incoming content type in the envelope.
+func TestHandler_Process_RawBodyInput(t *testing.T) {
+	payload := []byte{0x00, 0x01, 0xFF, 0xFE}
+	var got RawBody
+	handler := NewHandler[RawBody, testOutput]("upload", "POST", "/u",
+		func(req *Request[RawBody]) (testOutput, error) {
+			got = req.Body
+			return testOutput{Message: "ok"}, nil
+		})
+
+	req := httptest.NewRequest("POST", "/u", bytes.NewReader(payload))
+	req.Header.Set("Content-Type", "application/pdf")
+	w := httptest.NewRecorder()
+	status, err := handler.Process(context.Background(), req, w)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if status != http.StatusOK {
+		t.Errorf("status = %d, want 200", status)
+	}
+	if !bytes.Equal(got.Data, payload) {
+		t.Errorf("Body.Data = %v, want %v", got.Data, payload)
+	}
+	if got.ContentType != "application/pdf" {
+		t.Errorf("Body.ContentType = %q, want application/pdf", got.ContentType)
+	}
+}
+
+// TestHandler_Process_RawBodyMaxBytes verifies the size cap still applies to
+// raw bodies.
+func TestHandler_Process_RawBodyMaxBytes(t *testing.T) {
+	handler := NewHandler[RawBody, testOutput]("upload-cap", "POST", "/uc",
+		func(_ *Request[RawBody]) (testOutput, error) {
+			return testOutput{}, nil
+		}).WithMaxBodySize(4)
+
+	req := httptest.NewRequest("POST", "/uc", bytes.NewReader(make([]byte, 10)))
+	w := httptest.NewRecorder()
+	status, err := handler.Process(context.Background(), req, w)
+	if err == nil {
+		t.Fatal("expected error for oversized raw body")
+	}
+	if status != http.StatusRequestEntityTooLarge {
+		t.Errorf("status = %d, want 413", status)
+	}
+}

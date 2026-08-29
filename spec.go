@@ -12,6 +12,9 @@ const (
 	BodyNone BodyKind = "none"
 	// BodyStream is a Server-Sent Events stream.
 	BodyStream BodyKind = "stream"
+	// BodyRaw is raw bytes with a declared media type, bypassing the codec
+	// (RawBody input, Blob output).
+	BodyRaw BodyKind = "raw"
 )
 
 // RequestContract declares how a handler consumes the request body.

@@ -798,7 +798,8 @@ func (e *Engine) GenerateOpenAPI(identity Identity) *openapi.OpenAPI {
 		}
 
 		// Add request body according to the declared request contract.
-		if handlerSpec.Request.Kind == BodyEncoded {
+		switch handlerSpec.Request.Kind {
+		case BodyEncoded:
 			// Recursively collect input type and all nested types
 			if inputMeta, found := sentinel.Lookup(handlerSpec.InputTypeFQDN); found {
 				collectSchemas(inputMeta)
@@ -811,6 +812,19 @@ func (e *Engine) GenerateOpenAPI(identity Identity) *openapi.OpenAPI {
 						Schema: &openapi.Schema{Ref: "#/components/schemas/" + handlerSpec.InputTypeName},
 					},
 				},
+			}
+		case BodyRaw:
+			// Raw bytes under every declared media type. The input type is the
+			// RawBody marker and must not appear in component schemas.
+			content := make(map[string]openapi.MediaType, len(handlerSpec.Request.MediaTypes))
+			for _, mt := range handlerSpec.Request.MediaTypes {
+				content[mt] = openapi.MediaType{
+					Schema: &openapi.Schema{Type: openapi.NewSchemaType("string"), Format: "binary"},
+				}
+			}
+			operation.RequestBody = &openapi.RequestBody{
+				Required: true,
+				Content:  content,
 			}
 		}
 
@@ -849,6 +863,19 @@ func (e *Engine) GenerateOpenAPI(identity Identity) *openapi.OpenAPI {
 				}
 			}
 			operation.Responses[successStatus] = resp
+		case BodyRaw:
+			// Raw bytes under every declared media type. The output type is
+			// the Blob marker and must not appear in component schemas.
+			content := make(map[string]openapi.MediaType, len(handlerSpec.Response.MediaTypes))
+			for _, mt := range handlerSpec.Response.MediaTypes {
+				content[mt] = openapi.MediaType{
+					Schema: &openapi.Schema{Type: openapi.NewSchemaType("string"), Format: "binary"},
+				}
+			}
+			operation.Responses[successStatus] = openapi.Response{
+				Description: "Binary response",
+				Content:     content,
+			}
 		default: // BodyEncoded
 			// Recursively collect output type and all nested types
 			if outputMeta, found := sentinel.Lookup(handlerSpec.OutputTypeFQDN); found {
