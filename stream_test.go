@@ -1051,3 +1051,44 @@ func TestStreamHandler_Process_WrappedDisconnectError(t *testing.T) {
 		t.Errorf("expected status 200, got %d", status)
 	}
 }
+
+// TestStreamHandler_WithResponseHeaders verifies custom headers reach the
+// stream response and SSE protocol headers win on conflict.
+func TestStreamHandler_WithResponseHeaders(t *testing.T) {
+	handler := NewStreamHandler[NoBody, streamEvent](
+		"headers-stream", "GET", "/hs",
+		func(_ *Request[NoBody], _ Stream[streamEvent]) error { return nil },
+	).WithResponseHeaders(map[string]string{
+		"Access-Control-Allow-Origin": "*",
+		"Content-Type":                "text/plain", // must lose to SSE
+	})
+
+	req := httptest.NewRequest("GET", "/hs", nil)
+	w := httptest.NewRecorder()
+	if _, err := handler.Process(context.Background(), req, w); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := w.Header().Get("Access-Control-Allow-Origin"); got != "*" {
+		t.Errorf("custom header = %q, want *", got)
+	}
+	if got := w.Header().Get("Content-Type"); got != ContentTypeEventStream {
+		t.Errorf("Content-Type = %q, want SSE to win", got)
+	}
+}
+
+// TestStreamHandler_WithUsageLimit verifies the spec carries usage limits and
+// flags authentication, so the engine's shared middleware applies.
+func TestStreamHandler_WithUsageLimit(t *testing.T) {
+	handler := NewStreamHandler[NoBody, streamEvent](
+		"limited-stream", "GET", "/ls",
+		func(_ *Request[NoBody], _ Stream[streamEvent]) error { return nil },
+	).WithUsageLimit("streams_today", func(_ Identity) int { return 5 })
+
+	spec := handler.Spec()
+	if len(spec.UsageLimits) != 1 || spec.UsageLimits[0].Key != "streams_today" {
+		t.Errorf("UsageLimits = %+v, want one entry for streams_today", spec.UsageLimits)
+	}
+	if !spec.RequiresAuth {
+		t.Error("RequiresAuth = false, want true after WithUsageLimit")
+	}
+}

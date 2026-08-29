@@ -136,6 +136,9 @@ type StreamHandler[In, Out any] struct {
 	// Validation flag (checked once at creation time).
 	inputValidatable bool // True if In implements Validatable.
 
+	// Runtime configuration.
+	responseHeaders map[string]string // Default response headers.
+
 	// Middleware.
 	middleware []func(http.Handler) http.Handler
 }
@@ -202,6 +205,12 @@ func (h *StreamHandler[In, Out]) Process(ctx context.Context, r *http.Request, w
 			HandlerNameKey.Field(h.spec.Name),
 			ErrorKey.Field(fmt.Sprintf("could not clear write deadline: %v", err)),
 		)
+	}
+
+	// Write custom response headers first (e.g., CORS). The SSE protocol
+	// headers below overwrite them on conflict — they are not overridable.
+	for key, value := range h.responseHeaders {
+		w.Header().Set(key, value)
 	}
 
 	// Set SSE headers. The content type comes from the response contract —
@@ -334,6 +343,7 @@ func NewStreamHandler[In, Out any](name string, method, path string, fn func(*Re
 		InputMeta:        inputMeta,
 		OutputMeta:       outputMeta,
 		inputValidatable: inputValidatable,
+		responseHeaders:  make(map[string]string),
 		middleware:       make([]func(http.Handler) http.Handler, 0),
 	}
 }
@@ -388,6 +398,28 @@ func (h *StreamHandler[In, Out]) WithErrors(errs ...ErrorDefinition) *StreamHand
 // WithMiddleware adds middleware to this handler.
 func (h *StreamHandler[In, Out]) WithMiddleware(middleware ...func(http.Handler) http.Handler) *StreamHandler[In, Out] {
 	h.middleware = append(h.middleware, middleware...)
+	return h
+}
+
+// WithResponseHeaders sets default response headers for this stream handler
+// (e.g., CORS). The SSE protocol headers (Content-Type, Cache-Control,
+// Connection, X-Accel-Buffering) are not overridable and win on conflict.
+func (h *StreamHandler[In, Out]) WithResponseHeaders(headers map[string]string) *StreamHandler[In, Out] {
+	h.responseHeaders = headers
+	return h
+}
+
+// WithUsageLimit adds a usage limit check based on identity stats.
+// The handler will return 429 Too Many Requests if identity.Stats()[key] >= thresholdFunc(identity).
+// The thresholdFunc is called with the identity to allow dynamic limits per user/tenant.
+// Usage limits require authentication.
+func (h *StreamHandler[In, Out]) WithUsageLimit(key string, thresholdFunc func(Identity) int) *StreamHandler[In, Out] {
+	h.spec.UsageLimits = append(h.spec.UsageLimits, UsageLimit{
+		Key:           key,
+		ThresholdFunc: thresholdFunc,
+	})
+	// Usage limits require authentication
+	h.spec.RequiresAuth = true
 	return h
 }
 
