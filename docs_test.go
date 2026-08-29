@@ -2064,3 +2064,46 @@ func TestGenerateOpenAPI_RedirectStatusOverride(t *testing.T) {
 		t.Errorf("expected 301 response, got keys: %v", responseKeys(op.Responses))
 	}
 }
+
+// TestGenerateOpenAPI_RawHandler verifies BodyRaw documentation: binary
+// schemas under every declared media type, and no marker types in components.
+func TestGenerateOpenAPI_RawHandler(t *testing.T) {
+	engine := newTestEngine()
+	handler := NewHandler[RawBody, Blob]("asset", "POST", "/asset",
+		func(_ *Request[RawBody]) (Blob, error) { return Blob{}, nil },
+	).WithMediaTypes("image/png", "application/pdf")
+	engine.WithHandlers(handler)
+	engine.WithOpenAPIInfo(openapi.Info{Title: "Test", Version: "1.0.0"})
+
+	spec := engine.GenerateOpenAPI(nil)
+
+	op := spec.Paths["/asset"].Post
+	if op == nil {
+		t.Fatal("expected POST operation")
+	}
+	if op.RequestBody == nil {
+		t.Fatal("expected request body")
+	}
+	for _, mt := range []string{"image/png", "application/pdf"} {
+		media, ok := op.RequestBody.Content[mt]
+		if !ok {
+			t.Fatalf("request content missing %q", mt)
+		}
+		if media.Schema == nil || media.Schema.Format != "binary" {
+			t.Errorf("request %q schema = %+v, want binary format", mt, media.Schema)
+		}
+		if _, ok := op.Responses["200"].Content[mt]; !ok {
+			t.Errorf("response content missing %q", mt)
+		}
+	}
+	if op.Responses["200"].Content["image/png"].Schema.Format != "binary" {
+		t.Error("response schema is not binary format")
+	}
+
+	// Marker types must not leak into component schemas.
+	for _, name := range []string{"RawBody", "Blob"} {
+		if _, exists := spec.Components.Schemas[name]; exists {
+			t.Errorf("component schema %q should not exist", name)
+		}
+	}
+}

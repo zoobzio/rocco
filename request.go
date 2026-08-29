@@ -112,6 +112,16 @@ func decodeRequestBody[In any](ctx context.Context, r *http.Request, w http.Resp
 		)
 	}
 
+	// Raw contract: hand over the bytes and the incoming content type without
+	// decoding. BodyRaw is only set when In is RawBody.
+	if contract.Kind == BodyRaw {
+		if rb, ok := any(&input).(*RawBody); ok {
+			rb.ContentType = r.Header.Get("Content-Type")
+			rb.Data = body
+		}
+		return input, 0, nil
+	}
+
 	if len(body) == 0 {
 		return input, 0, nil
 	}
