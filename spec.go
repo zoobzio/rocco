@@ -21,6 +21,9 @@ type RequestContract struct {
 	Kind BodyKind `json:"kind" yaml:"kind"`
 	// MaxBytes is the maximum request body size (0 = unlimited).
 	MaxBytes int64 `json:"maxBytes,omitempty" yaml:"maxBytes,omitempty"`
+	// MediaTypes lists the content types the handler accepts for the body.
+	// For encoded bodies this is the codec's content type.
+	MediaTypes []string `json:"mediaTypes,omitempty" yaml:"mediaTypes,omitempty"`
 }
 
 // ResponseContract declares the success response shape of a handler.
@@ -33,6 +36,20 @@ type ResponseContract struct {
 	Status int      `json:"status" yaml:"status"`
 	// Redirect marks a BodyNone response that carries a Location header.
 	Redirect bool `json:"redirect,omitempty" yaml:"redirect,omitempty"`
+	// MediaTypes lists the content types the response body may carry.
+	// For encoded bodies this is the codec's content type; for streams it is
+	// text/event-stream. The runtime Content-Type header and the OpenAPI
+	// content keys both come from this list.
+	MediaTypes []string `json:"mediaTypes,omitempty" yaml:"mediaTypes,omitempty"`
+}
+
+// primaryMediaType returns the first declared media type, or JSON when the
+// list is empty — the encoded default.
+func primaryMediaType(mediaTypes []string) string {
+	if len(mediaTypes) > 0 {
+		return mediaTypes[0]
+	}
+	return ContentTypeJSON
 }
 
 // HandlerSpec contains declarative configuration for a route handler.
@@ -58,7 +75,6 @@ type HandlerSpec struct {
 	OutputTypeName string           `json:"outputTypeName" yaml:"outputTypeName"`
 	Request        RequestContract  `json:"request" yaml:"request"`
 	Response       ResponseContract `json:"response" yaml:"response"`
-	ContentType    string           `json:"contentType,omitempty" yaml:"contentType,omitempty"` // Codec MIME type for encoded bodies
 
 	// Authentication & Authorization
 	RequiresAuth bool       `json:"requiresAuth" yaml:"requiresAuth"`

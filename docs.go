@@ -804,14 +804,10 @@ func (e *Engine) GenerateOpenAPI(identity Identity) *openapi.OpenAPI {
 				collectSchemas(inputMeta)
 			}
 
-			contentType := handlerSpec.ContentType
-			if contentType == "" {
-				contentType = ContentTypeJSON
-			}
 			operation.RequestBody = &openapi.RequestBody{
 				Required: true,
 				Content: map[string]openapi.MediaType{
-					contentType: {
+					primaryMediaType(handlerSpec.Request.MediaTypes): {
 						Schema: &openapi.Schema{Ref: "#/components/schemas/" + handlerSpec.InputTypeName},
 					},
 				},
@@ -831,7 +827,7 @@ func (e *Engine) GenerateOpenAPI(identity Identity) *openapi.OpenAPI {
 			operation.Responses[successStatus] = openapi.Response{
 				Description: "Server-Sent Events stream",
 				Content: map[string]openapi.MediaType{
-					"text/event-stream": {
+					primaryMediaType(handlerSpec.Response.MediaTypes): {
 						Schema: &openapi.Schema{
 							Type:        openapi.NewSchemaType("string"),
 							Description: fmt.Sprintf("SSE stream emitting %s events as JSON", handlerSpec.OutputTypeName),
@@ -858,14 +854,10 @@ func (e *Engine) GenerateOpenAPI(identity Identity) *openapi.OpenAPI {
 			if outputMeta, found := sentinel.Lookup(handlerSpec.OutputTypeFQDN); found {
 				collectSchemas(outputMeta)
 			}
-			responseContentType := handlerSpec.ContentType
-			if responseContentType == "" {
-				responseContentType = ContentTypeJSON
-			}
 			operation.Responses[successStatus] = openapi.Response{
 				Description: "Success",
 				Content: map[string]openapi.MediaType{
-					responseContentType: {
+					primaryMediaType(handlerSpec.Response.MediaTypes): {
 						Schema: &openapi.Schema{Ref: "#/components/schemas/" + handlerSpec.OutputTypeName},
 					},
 				},

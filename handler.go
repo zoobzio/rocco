@@ -242,7 +242,7 @@ func (h *Handler[In, Out]) Process(ctx context.Context, r *http.Request, w http.
 		for key, value := range h.responseHeaders {
 			w.Header().Set(key, value)
 		}
-		w.Header().Set("Content-Type", h.spec.ContentType)
+		w.Header().Set("Content-Type", primaryMediaType(h.spec.Response.MediaTypes))
 
 		// Write status and body.
 		w.WriteHeader(h.spec.Response.Status)
@@ -290,16 +290,19 @@ func NewHandler[In, Out any](name string, method, path string, fn func(*Request[
 	// contract is the single declaration both the runtime write path and
 	// OpenAPI generation consume.
 	request := RequestContract{
-		Kind:     BodyEncoded,
-		MaxBytes: 10 * 1024 * 1024, // Default to 10MB.
+		Kind:       BodyEncoded,
+		MaxBytes:   10 * 1024 * 1024, // Default to 10MB.
+		MediaTypes: []string{defaultCodec.ContentType()},
 	}
 	if inputMeta.TypeName == noBodyTypeName {
 		request.Kind = BodyNone
+		request.MediaTypes = nil
 	}
 
 	response := ResponseContract{
-		Kind:   BodyEncoded,
-		Status: http.StatusOK, // Default to 200.
+		Kind:       BodyEncoded,
+		Status:     http.StatusOK, // Default to 200.
+		MediaTypes: []string{defaultCodec.ContentType()},
 	}
 	if _, isRedirect := any(zeroOut).(Redirect); isRedirect {
 		response = ResponseContract{
@@ -323,7 +326,6 @@ func NewHandler[In, Out any](name string, method, path string, fn func(*Request[
 			OutputTypeName: outputMeta.TypeName,
 			Request:        request,
 			Response:       response,
-			ContentType:    defaultCodec.ContentType(),
 			RequiresAuth:   false,
 			ScopeGroups:    [][]string{},
 			RoleGroups:     [][]string{},
@@ -494,8 +496,7 @@ func (h *Handler[In, Out]) WithOutputValidation() *Handler[In, Out] {
 // WithCodec sets the codec for request/response serialization.
 // This overrides the engine's default codec for this handler.
 func (h *Handler[In, Out]) WithCodec(codec Codec) *Handler[In, Out] {
-	h.codec = codec
-	h.spec.ContentType = codec.ContentType()
+	h.setCodec(codec)
 	h.codecExplicit = true
 	return h
 }
@@ -504,8 +505,20 @@ func (h *Handler[In, Out]) WithCodec(codec Codec) *Handler[In, Out] {
 // Called by Engine when registering handlers.
 func (h *Handler[In, Out]) applyDefaultCodec(codec Codec) {
 	if !h.codecExplicit {
-		h.codec = codec
-		h.spec.ContentType = codec.ContentType()
+		h.setCodec(codec)
+	}
+}
+
+// setCodec assigns the codec and updates the media types on the encoded
+// contracts to match. Non-encoded contracts (NoBody, Redirect) carry no
+// codec media type and are left alone.
+func (h *Handler[In, Out]) setCodec(codec Codec) {
+	h.codec = codec
+	if h.spec.Request.Kind == BodyEncoded {
+		h.spec.Request.MediaTypes = []string{codec.ContentType()}
+	}
+	if h.spec.Response.Kind == BodyEncoded {
+		h.spec.Response.MediaTypes = []string{codec.ContentType()}
 	}
 }
 

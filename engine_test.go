@@ -1035,8 +1035,8 @@ func TestEngine_WithCodec(t *testing.T) {
 
 	// Handler should inherit engine's codec
 	spec := handler.Spec()
-	if spec.ContentType != "application/xml" {
-		t.Errorf("expected content type 'application/xml', got %q", spec.ContentType)
+	if primaryMediaType(spec.Response.MediaTypes) != "application/xml" {
+		t.Errorf("expected content type 'application/xml', got %q", primaryMediaType(spec.Response.MediaTypes))
 	}
 }
 
@@ -1059,8 +1059,62 @@ func TestEngine_WithCodec_HandlerOverride(t *testing.T) {
 
 	// Handler should keep its explicit codec
 	spec := handler.Spec()
-	if spec.ContentType != "application/yaml" {
-		t.Errorf("expected content type 'application/yaml', got %q", spec.ContentType)
+	if primaryMediaType(spec.Response.MediaTypes) != "application/yaml" {
+		t.Errorf("expected content type 'application/yaml', got %q", primaryMediaType(spec.Response.MediaTypes))
+	}
+}
+
+func TestEngine_WithCodec_StreamMismatchWarns(t *testing.T) {
+	warned := make(chan struct{}, 1)
+	listener := capitan.Hook(HandlerCodecMismatch, func(_ context.Context, _ *capitan.Event) {
+		warned <- struct{}{}
+	})
+	defer listener.Close()
+
+	xmlCodec := testCodec{contentType: "application/xml"}
+	engine := newTestEngine().WithCodec(xmlCodec)
+
+	stream := NewStreamHandler[NoBody, testOutput](
+		"events",
+		"GET",
+		"/events",
+		func(_ *Request[NoBody], _ Stream[testOutput]) error { return nil },
+	)
+	engine.WithHandlers(stream)
+
+	select {
+	case <-warned:
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected HandlerCodecMismatch warning for stream handler with non-JSON engine codec")
+	}
+
+	// The stream contract stays SSE regardless of the engine codec.
+	if got := primaryMediaType(stream.Spec().Response.MediaTypes); got != ContentTypeEventStream {
+		t.Errorf("stream response media type = %q, want %q", got, ContentTypeEventStream)
+	}
+}
+
+func TestEngine_WithCodec_JSONStreamDoesNotWarn(t *testing.T) {
+	warned := make(chan struct{}, 1)
+	listener := capitan.Hook(HandlerCodecMismatch, func(_ context.Context, _ *capitan.Event) {
+		warned <- struct{}{}
+	})
+	defer listener.Close()
+
+	engine := newTestEngine().WithCodec(JSONCodec{})
+
+	stream := NewStreamHandler[NoBody, testOutput](
+		"events-json",
+		"GET",
+		"/events-json",
+		func(_ *Request[NoBody], _ Stream[testOutput]) error { return nil },
+	)
+	engine.WithHandlers(stream)
+
+	select {
+	case <-warned:
+		t.Fatal("unexpected HandlerCodecMismatch warning for JSON engine codec")
+	case <-time.After(100 * time.Millisecond):
 	}
 }
 

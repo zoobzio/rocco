@@ -234,6 +234,16 @@ func (e *Engine) WithHandlers(handlers ...Endpoint) *Engine {
 			MethodKey.Field(handlerSpec.Method),
 			PathKey.Field(handlerSpec.Path),
 		)
+
+		// A stream handler's wire format is fixed: SSE frames carrying JSON.
+		// A non-JSON engine codec does not reach it. Warn so the mismatch is
+		// visible at registration instead of silently ignored.
+		if e.codec != nil && e.codec.ContentType() != ContentTypeJSON && handlerSpec.Response.Kind == BodyStream {
+			capitan.Warn(e.ctx, HandlerCodecMismatch,
+				HandlerNameKey.Field(handlerSpec.Name),
+				ErrorKey.Field(fmt.Sprintf("engine codec %q does not apply: streams always use JSON in SSE frames", e.codec.ContentType())),
+			)
+		}
 	}
 	return e
 }

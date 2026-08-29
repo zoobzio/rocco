@@ -13,6 +13,9 @@ import (
 	"github.com/zoobz-io/sentinel"
 )
 
+// ContentTypeEventStream is the media type for Server-Sent Events responses.
+const ContentTypeEventStream = "text/event-stream"
+
 // errClientDisconnected is returned by stream sends after the client has
 // disconnected. Handlers can match it with errors.Is.
 var errClientDisconnected = errors.New("client disconnected")
@@ -201,8 +204,9 @@ func (h *StreamHandler[In, Out]) Process(ctx context.Context, r *http.Request, w
 		)
 	}
 
-	// Set SSE headers
-	w.Header().Set("Content-Type", "text/event-stream")
+	// Set SSE headers. The content type comes from the response contract —
+	// the same declaration OpenAPI generation reads.
+	w.Header().Set("Content-Type", primaryMediaType(h.spec.Response.MediaTypes))
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("X-Accel-Buffering", "no") // Disable nginx buffering
@@ -289,13 +293,17 @@ func NewStreamHandler[In, Out any](name string, method, path string, fn func(*Re
 	var zeroIn In
 	_, inputValidatable := any(zeroIn).(Validatable)
 
-	// Derive the request contract from the input type parameter.
+	// Derive the request contract from the input type parameter. Stream
+	// request bodies are always JSON — SSE is a text protocol and streams
+	// do not participate in codec selection.
 	request := RequestContract{
-		Kind:     BodyEncoded,
-		MaxBytes: 10 * 1024 * 1024, // Default to 10MB.
+		Kind:       BodyEncoded,
+		MaxBytes:   10 * 1024 * 1024, // Default to 10MB.
+		MediaTypes: []string{ContentTypeJSON},
 	}
 	if inputMeta.TypeName == noBodyTypeName {
 		request.Kind = BodyNone
+		request.MediaTypes = nil
 	}
 
 	return &StreamHandler[In, Out]{
@@ -312,8 +320,9 @@ func NewStreamHandler[In, Out any](name string, method, path string, fn func(*Re
 			OutputTypeName: outputMeta.TypeName,
 			Request:        request,
 			Response: ResponseContract{
-				Kind:   BodyStream,
-				Status: http.StatusOK,
+				Kind:       BodyStream,
+				Status:     http.StatusOK,
+				MediaTypes: []string{ContentTypeEventStream},
 			},
 			RequiresAuth: false,
 			ScopeGroups:  [][]string{},

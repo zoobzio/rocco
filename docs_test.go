@@ -1426,7 +1426,7 @@ func (m *mockIdentity) HasRole(role string) bool {
 func TestGenerateOpenAPI_EmptyContentTypeFallback(t *testing.T) {
 	engine := newTestEngine()
 
-	// Create a handler and clear its ContentType to exercise the fallback
+	// Create a handler and clear its media types to exercise the fallback
 	handler := NewHandler[testInput, testOutput](
 		"empty-ct",
 		"POST",
@@ -1435,7 +1435,8 @@ func TestGenerateOpenAPI_EmptyContentTypeFallback(t *testing.T) {
 			return testOutput{}, nil
 		},
 	)
-	handler.spec.ContentType = "" // Force empty to trigger fallback
+	handler.spec.Request.MediaTypes = nil // Force empty to trigger fallback
+	handler.spec.Response.MediaTypes = nil
 
 	engine.WithHandlers(handler)
 	engine.WithOpenAPIInfo(openapi.Info{Title: "Test", Version: "1.0.0"})
