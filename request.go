@@ -2,9 +2,13 @@ package rocco
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
+
+	"github.com/zoobz-io/capitan"
 )
 
 // noBodyTypeName is the sentinel type name for handlers without a request body.
@@ -63,4 +67,77 @@ func extractParams(_ context.Context, r *http.Request, pathParams, queryParams [
 	}
 
 	return params, nil
+}
+
+// decodeRequestBody reads, decodes, and validates the request body according to
+// the request contract. Shared by Handler and StreamHandler so the two paths
+// cannot drift. On failure it writes the error response and returns the HTTP
+// status with a non-nil error; callers return both unchanged. On success the
+// error is nil and the status is 0.
+func decodeRequestBody[In any](ctx context.Context, r *http.Request, w http.ResponseWriter, contract RequestContract, unmarshal func([]byte, any) error, validatable bool, handlerName string) (input In, status int, err error) {
+	if contract.Kind == BodyNone || r.Body == nil {
+		return input, 0, nil
+	}
+
+	// Limit body size if configured - use MaxBytesReader for proper 413 errors.
+	if contract.MaxBytes > 0 {
+		r.Body = http.MaxBytesReader(w, r.Body, contract.MaxBytes)
+	}
+
+	body, readErr := io.ReadAll(r.Body)
+	if readErr != nil {
+		// Check if this is a max bytes exceeded error.
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(readErr, &maxBytesErr) {
+			capitan.Warn(ctx, RequestBodyReadError,
+				HandlerNameKey.Field(handlerName),
+				ErrorKey.Field("payload too large"),
+			)
+			writeError(ctx, w, ErrPayloadTooLarge.WithDetails(PayloadTooLargeDetails{
+				MaxSize: contract.MaxBytes,
+			}), handlerName)
+			return input, http.StatusRequestEntityTooLarge, readErr
+		}
+		capitan.Error(ctx, RequestBodyReadError,
+			HandlerNameKey.Field(handlerName),
+			ErrorKey.Field(readErr.Error()),
+		)
+		writeError(ctx, w, ErrBadRequest.WithMessage("failed to read request body").WithCause(readErr), handlerName)
+		return input, http.StatusBadRequest, readErr
+	}
+	if closeErr := r.Body.Close(); closeErr != nil {
+		capitan.Warn(ctx, RequestBodyCloseError,
+			HandlerNameKey.Field(handlerName),
+			ErrorKey.Field(closeErr.Error()),
+		)
+	}
+
+	if len(body) == 0 {
+		return input, 0, nil
+	}
+
+	if unmarshalErr := unmarshal(body, &input); unmarshalErr != nil {
+		capitan.Error(ctx, RequestBodyParseError,
+			HandlerNameKey.Field(handlerName),
+			ErrorKey.Field(unmarshalErr.Error()),
+		)
+		writeError(ctx, w, ErrUnprocessableEntity.WithMessage("invalid request body").WithCause(unmarshalErr), handlerName)
+		return input, http.StatusUnprocessableEntity, unmarshalErr
+	}
+
+	// Validate input if type implements Validatable.
+	if validatable {
+		if v, ok := any(input).(Validatable); ok {
+			if inputErr := v.Validate(); inputErr != nil {
+				capitan.Warn(ctx, RequestValidationInputFailed,
+					HandlerNameKey.Field(handlerName),
+					ErrorKey.Field(inputErr.Error()),
+				)
+				writeValidationErrorResponse(ctx, w, inputErr, handlerName)
+				return input, http.StatusUnprocessableEntity, inputErr
+			}
+		}
+	}
+
+	return input, 0, nil
 }
